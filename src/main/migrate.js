@@ -52,6 +52,7 @@ const path = require('path');
 const MIGRATION02 = path.join(__dirname, '..', '..', 'sql', 'migration_02.sql');
 const MIGRATION03 = path.join(__dirname, '..', '..', 'sql', 'migration_03.sql');
 const MIGRATION04 = path.join(__dirname, '..', '..', 'sql', 'migration_04.sql');
+const MIGRATION05 = path.join(__dirname, '..', '..', 'sql', 'migration_05.sql');
 
 /** Crée les tables/colonnes des congés, catégories et comptabilité si elles manquent (nécessite le droit de créer des tables). */
 async function ensureMigration02(db) {
@@ -98,6 +99,19 @@ async function ensureMigration04(db) {
   } catch (e) {
     throw new Error("Une mise à jour de la base est nécessaire (cumul annuel de l'IR et de la TRIMF). Dans SSMS : sélectionnez la base « " + db.cfg.database +
       " », ouvrez le fichier « migration_04.sql » (dossier « sql » de PaieGestion), exécutez-le, puis relancez PaieGestion. (" + e.message + ')');
+  }
+}
+
+/** Ajoute la base de retenue (brut imposable / net après impôt) et le remboursement de prêt échelonné. */
+async function ensureMigration05(db) {
+  const r = (await db.query(`SELECT COL_LENGTH(N'paie.Rubrique', N'BaseRetenue') AS a, COL_LENGTH(N'paie.Rubrique', N'Echelonne') AS b,
+    COL_LENGTH(N'paie.EmployeRubrique', N'MontantPret') AS c, COL_LENGTH(N'paie.EmployeRubrique', N'DureeMois') AS d`))[0];
+  if (r.a != null && r.b != null && r.c != null && r.d != null) return;
+  try {
+    await db.batch(fs.readFileSync(MIGRATION05, 'utf8'));
+  } catch (e) {
+    throw new Error("Une mise à jour de la base est nécessaire (prêts et base de retenue). Dans SSMS : sélectionnez la base « " + db.cfg.database +
+      " », ouvrez le fichier « migration_05.sql » (dossier « sql » de PaieGestion), exécutez-le, puis relancez PaieGestion. (" + e.message + ')');
   }
 }
 
@@ -209,6 +223,7 @@ WHERE b.DateFin IS NULL AND b.Verifie = 0;
   await db.batch(seed02Sql());
   await ensureMigration03(db);
   await ensureMigration04(db);
+  await ensureMigration05(db);
 }
 
-module.exports = { ensureSchema, ensureMigration03, ensureMigration04, MIGRATION04, REDUCTION_FAMILLE, reductionSql, IPM_SQL, seed02Sql, MIGRATION02, MIGRATION03, COMPTES_RUBRIQUES, PARAMS_COMPTA };
+module.exports = { ensureSchema, ensureMigration03, ensureMigration04, MIGRATION04, ensureMigration05, MIGRATION05, REDUCTION_FAMILLE, reductionSql, IPM_SQL, seed02Sql, MIGRATION02, MIGRATION03, COMPTES_RUBRIQUES, PARAMS_COMPTA };

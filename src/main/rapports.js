@@ -7,7 +7,8 @@
 const MOIS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
 const SITFAM = { C: 'Célibataire', M: 'Marié(e)', D: 'Divorcé(e)', V: 'Veuf/Veuve' };
 const STATUT_CONGE = { DEMANDE: 'En attente', APPROUVE: 'Approuvé', REFUSE: 'Refusé', PRIS: 'Pris' };
-const REPORT_TYPES = ['journal', 'annuel', 'cotisations', 'impots', 'historique', 'employes', 'conges'];
+const REPORT_TYPES = ['journal', 'annuel', 'cotisations', 'impots', 'historique', 'employes', 'conges',
+  'decl_ir', 'decl_trimf', 'decl_cfce', 'decl_ipres_css', 'decl_ipm', 'decl_1024'];
 
 const r2 = (x) => Math.round(Number(x || 0) * 100) / 100;
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -521,7 +522,9 @@ function buildReport(type, rawData, filters = {}, meta = {}) {
     case 'historique': return buildHistorique(rawData, filters, meta);
     case 'employes': return buildEmployes(rawData, filters, meta);
     case 'conges': return buildConges(rawData, filters, meta);
-    default: throw new Error(`Type de rapport inconnu : ${type}`);
+    default:
+      if (String(type).startsWith('decl_')) return require('./declarations').buildDeclaration(type, rawData, filters, meta);   // chargé à la demande (évite une dépendance circulaire)
+      throw new Error(`Type de rapport inconnu : ${type}`);
   }
 }
 

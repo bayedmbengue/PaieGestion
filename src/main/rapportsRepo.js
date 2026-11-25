@@ -30,8 +30,8 @@ function normalizeFilters(type, raw = {}) {
   const curMonth = now.getMonth() + 1;
   const annee = intIn(raw.annee, 2000, 2100, curYear);
   const mois = intIn(raw.mois, 1, 12, curMonth);
-  let moisDebut = intIn(raw.moisDebut, 1, 12, type === 'annuel' || type === 'historique' ? 1 : mois);
-  let moisFin = intIn(raw.moisFin, 1, 12, type === 'annuel' || type === 'historique' ? 12 : mois);
+  let moisDebut = intIn(raw.moisDebut, 1, 12, type === 'annuel' || type === 'historique' || type === 'decl_1024' ? 1 : mois);
+  let moisFin = intIn(raw.moisFin, 1, 12, type === 'annuel' || type === 'historique' || type === 'decl_1024' ? 12 : mois);
   if (moisFin < moisDebut) [moisDebut, moisFin] = [moisFin, moisDebut];
   let dateDebut = optDate(raw.dateDebut, `${annee}-01-01`);
   let dateFin = optDate(raw.dateFin, `${annee}-12-31`);
@@ -160,6 +160,44 @@ const queryImpots = (db, { annee, moisDebut, moisFin, employeId, categorie }) =>
   ORDER BY e.Nom, e.Prenom`,
 { annee, moisDebut, moisFin, emp: employeId, cat: categorie });
 
+/** Base de toutes les déclarations : une ligne par employé, cumul des bulletins de la période. */
+const queryDeclaration = (db, { annee, moisDebut, moisFin, employeId, categorie }) => db.query(`
+  SELECT e.Id AS EmployeId, e.Matricule, e.Nom, e.Prenom, e.SituationFamiliale, e.NumeroIPRES, e.NumeroCSS, e.DateEmbauche, e.DateSortie,
+         MAX(b.NombreParts) AS NombreParts, COUNT(b.Id) AS NbMois,
+         SUM(b.Brut) AS Brut,
+         SUM(ISNULL(b.BrutImposable, b.Brut)) AS BrutImposable,
+         SUM(ISNULL(b.BrutCfceTrimf, ISNULL(b.BrutImposable, b.Brut))) AS BrutCfceTrimf,
+         SUM(b.BaseIPRES) AS BaseIPRES, SUM(b.TotalCotisSalariales) AS TotalCotisSalariales,
+         SUM(b.ImpotRevenu) AS ImpotRevenu, SUM(b.TRIMF) AS TRIMF, SUM(b.Net) AS Net,
+         SUM(ISNULL(lb.IpresRgSal, 0)) AS IpresRgSal, SUM(ISNULL(lb.IpresRgPat, 0)) AS IpresRgPat,
+         SUM(ISNULL(lb.IpresRccSal, 0)) AS IpresRccSal, SUM(ISNULL(lb.IpresRccPat, 0)) AS IpresRccPat,
+         SUM(ISNULL(lb.CssPfPat, 0)) AS CssPfPat, SUM(ISNULL(lb.CssAtmpPat, 0)) AS CssAtmpPat,
+         SUM(ISNULL(lb.IpmSal, 0)) AS IpmSal, SUM(ISNULL(lb.IpmPat, 0)) AS IpmPat, SUM(ISNULL(lb.CfcePat, 0)) AS CfcePat
+  FROM paie.BulletinPaie b
+  JOIN paie.PeriodePaie p ON p.Id = b.PeriodeId
+  JOIN paie.Employe e ON e.Id = b.EmployeId
+  OUTER APPLY (SELECT TOP 1 c.Categorie FROM paie.Contrat c WHERE c.EmployeId = e.Id AND c.EstActif = 1 ORDER BY c.DateDebut DESC) k
+  OUTER APPLY (
+    SELECT
+      SUM(CASE WHEN r.Code = N'IPRES_RG_SAL'  THEN l.MontantRetenue  ELSE 0 END) AS IpresRgSal,
+      SUM(CASE WHEN r.Code = N'IPRES_RG_PAT'  THEN l.MontantPatronal ELSE 0 END) AS IpresRgPat,
+      SUM(CASE WHEN r.Code = N'IPRES_RCC_SAL' THEN l.MontantRetenue  ELSE 0 END) AS IpresRccSal,
+      SUM(CASE WHEN r.Code = N'IPRES_RCC_PAT' THEN l.MontantPatronal ELSE 0 END) AS IpresRccPat,
+      SUM(CASE WHEN r.Code = N'CSS_PF_PAT'    THEN l.MontantPatronal ELSE 0 END) AS CssPfPat,
+      SUM(CASE WHEN r.Code = N'CSS_ATMP_PAT'  THEN l.MontantPatronal ELSE 0 END) AS CssAtmpPat,
+      SUM(CASE WHEN r.Code = N'IPM_SAL'       THEN l.MontantRetenue  ELSE 0 END) AS IpmSal,
+      SUM(CASE WHEN r.Code = N'IPM_PAT'       THEN l.MontantPatronal ELSE 0 END) AS IpmPat,
+      SUM(CASE WHEN r.Code = N'CFCE_PAT'      THEN l.MontantPatronal ELSE 0 END) AS CfcePat
+    FROM paie.LigneBulletin l JOIN paie.Rubrique r ON r.Id = l.RubriqueId
+    WHERE l.BulletinId = b.Id
+  ) lb
+  WHERE p.Annee = @annee AND p.Mois BETWEEN @moisDebut AND @moisFin
+    AND (@emp IS NULL OR e.Id = @emp)
+    AND (@cat IS NULL OR k.Categorie = @cat)
+  GROUP BY e.Id, e.Matricule, e.Nom, e.Prenom, e.SituationFamiliale, e.NumeroIPRES, e.NumeroCSS, e.DateEmbauche, e.DateSortie
+  ORDER BY e.Nom, e.Prenom`,
+{ annee, moisDebut, moisFin, emp: employeId, cat: categorie });
+
 const queryEmployes = (db, { employeId, categorie, actif }) => db.query(`
   SELECT e.Id, e.Matricule, e.Nom, e.Prenom, e.Sexe, e.SituationFamiliale, e.NombreEnfants, e.NombreParts,
          e.EstCadre, e.NumeroIPRES, e.NumeroCSS, e.ModePaiement, e.DateEmbauche, e.DateSortie, e.Actif,
@@ -232,6 +270,7 @@ async function runReport(db, type, rawFilters = {}) {
   else if (type === 'annuel' || type === 'historique') raw = await queryBulletinsPeriode(db, f);
   else if (type === 'cotisations') raw = await queryCotisations(db, f);
   else if (type === 'impots') raw = await queryImpots(db, f);
+  else if (type.startsWith('decl_')) raw = await queryDeclaration(db, f);
   else if (type === 'employes') raw = await queryEmployes(db, f);
   else if (type === 'conges') raw = await queryConges(db, f);
   return { report: buildReport(type, raw, f, meta), filters: f };
@@ -241,5 +280,5 @@ const getEntreprise = async (db) => (await db.query('SELECT * FROM paie.Entrepri
 
 module.exports = {
   normalizeFilters, getFilterOptions, runReport, getEntreprise,
-  queryBulletinsPeriode, queryCotisations, queryImpots, queryEmployes, queryConges,
+  queryBulletinsPeriode, queryCotisations, queryImpots, queryDeclaration, queryEmployes, queryConges,
 };

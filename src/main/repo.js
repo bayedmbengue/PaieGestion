@@ -158,12 +158,12 @@ async function deactivateEmploye(db, id, user) {
 }
 
 const listRubriquesSaisie = (db) => db.query(
-  "SELECT Id, Code, Libelle, Type, ModeCalcul, Imposable, SoumisCotisation, SoumisCfceTrimf, PlafondExoneration FROM paie.Rubrique WHERE Actif = 1 AND Type IN (N'GAIN', N'RETENUE') AND EstSysteme = 0 AND Code <> N'SALBASE' ORDER BY Ordre, Id");
+  "SELECT Id, Code, Libelle, Type, ModeCalcul, Imposable, SoumisCotisation, SoumisCfceTrimf, PlafondExoneration, BaseRetenue, Echelonne FROM paie.Rubrique WHERE Actif = 1 AND Type IN (N'GAIN', N'RETENUE') AND EstSysteme = 0 AND Code <> N'SALBASE' ORDER BY Ordre, Id");
 
 // ───────────────────────── Rubriques de paie ─────────────────────────
 const listRubriques = (db) => db.query(`
   SELECT r.Id, r.Code, r.Libelle, r.Type, r.ModeCalcul, r.Imposable, r.SoumisCotisation, r.SoumisCfceTrimf,
-         r.PlafondExoneration, r.Ordre, r.CompteComptable, r.EstSysteme, r.Actif
+         r.PlafondExoneration, r.BaseRetenue, r.Echelonne, r.Ordre, r.CompteComptable, r.EstSysteme, r.Actif
   FROM paie.Rubrique r ORDER BY r.Ordre, r.Id`);
 
 /** Plafond d'exonération mensuel (ParametreLegal EXO_<CODE> tenu synchronisé s'il existe déjà). */
@@ -209,11 +209,13 @@ async function saveRubrique(db, d, user) {
       const cotis = gain && (d.SoumisCotisation !== undefined ? d.SoumisCotisation : d.Imposable) ? 1 : 0;
       const cfce = gain && (d.SoumisCfceTrimf !== undefined ? d.SoumisCfceTrimf : d.Imposable) ? 1 : 0;
       const plafond = gain ? exoValue(d.PlafondExoneration) : null;
+      const baseRet = !gain && rubriques.BASES_RETENUE.includes(d.BaseRetenue) ? d.BaseRetenue : 'NET_APRES_IMPOT';
+      const echel = !gain && d.Echelonne ? 1 : 0;
       await db.query(`UPDATE paie.Rubrique
         SET Libelle=@l, ModeCalcul=@mc, Imposable=@i, SoumisCotisation=@s, SoumisCfceTrimf=@cf,
-            PlafondExoneration=@pl, Ordre=@o, CompteComptable=@cc, Actif=@a
+            PlafondExoneration=@pl, BaseRetenue=@br, Echelonne=@ec, Ordre=@o, CompteComptable=@cc, Actif=@a
         WHERE Id=@id`,
-        { l: libelle, mc: mode, i: imp, s: cotis, cf: cfce, pl: plafond, o: ordre, cc: compte, a: d.Actif === false ? 0 : 1, id });
+        { l: libelle, mc: mode, i: imp, s: cotis, cf: cfce, pl: plafond, br: baseRet, ec: echel, o: ordre, cc: compte, a: d.Actif === false ? 0 : 1, id });
       if (gain && d.PlafondExoneration !== undefined) await syncExonerationParam(db, cur.Code, plafond);
     } else {
       // rubrique système : seuls le libellé, l'ordre et le compte comptable sont modifiables
@@ -232,13 +234,15 @@ async function saveRubrique(db, d, user) {
   const cotis = gain && (d.SoumisCotisation !== undefined ? d.SoumisCotisation : d.Imposable) ? 1 : 0;
   const cfce = gain && (d.SoumisCfceTrimf !== undefined ? d.SoumisCfceTrimf : d.Imposable) ? 1 : 0;
   const plafond = gain ? exoValue(d.PlafondExoneration) : null;
+  const baseRet = !gain && rubriques.BASES_RETENUE.includes(d.BaseRetenue) ? d.BaseRetenue : 'NET_APRES_IMPOT';
+  const echel = !gain && d.Echelonne ? 1 : 0;
   let newId = null;
   try {
     const ins = await db.query(`INSERT INTO paie.Rubrique
-      (Code, Libelle, Type, ModeCalcul, Imposable, SoumisCotisation, SoumisCfceTrimf, PlafondExoneration, Ordre, CompteComptable, EstSysteme)
+      (Code, Libelle, Type, ModeCalcul, Imposable, SoumisCotisation, SoumisCfceTrimf, PlafondExoneration, BaseRetenue, Echelonne, Ordre, CompteComptable, EstSysteme)
       OUTPUT INSERTED.Id
-      VALUES (@c,@l,@t,@mc,@i,@s,@cf,@pl,@o,@cc,0)`,
-      { c: code, l: libelle, t: d.Type, mc: mode, i: imp, s: cotis, cf: cfce, pl: plafond, o: ordre, cc: compte });
+      VALUES (@c,@l,@t,@mc,@i,@s,@cf,@pl,@br,@ec,@o,@cc,0)`,
+      { c: code, l: libelle, t: d.Type, mc: mode, i: imp, s: cotis, cf: cfce, pl: plafond, br: baseRet, ec: echel, o: ordre, cc: compte });
     newId = ins[0] ? ins[0].Id : null;
     if (newId && compte) await syncCompteRubrique(db, newId, d.Type, compte);
   } catch (err) {
@@ -251,8 +255,8 @@ async function saveRubrique(db, d, user) {
 // ───────────────────────── Affectations employé-rubrique ─────────────────────────
 const listEmployeRubriques = (db, f = {}) => db.query(`
   SELECT er.Id, er.EmployeId, e.Matricule, e.Nom, e.Prenom,
-         er.RubriqueId, r.Code AS RubriqueCode, r.Libelle AS Rubrique, r.Type, r.ModeCalcul,
-         er.Montant, er.Taux, er.DateDebut, er.DateFin, er.Actif, er.Commentaire
+         er.RubriqueId, r.Code AS RubriqueCode, r.Libelle AS Rubrique, r.Type, r.ModeCalcul, r.Echelonne, r.BaseRetenue,
+         er.Montant, er.Taux, er.MontantPret, er.DureeMois, er.DateDebut, er.DateFin, er.Actif, er.Commentaire
   FROM paie.EmployeRubrique er
   JOIN paie.Employe e ON e.Id = er.EmployeId
   JOIN paie.Rubrique r ON r.Id = er.RubriqueId
@@ -272,19 +276,34 @@ async function saveEmployeRubrique(db, d, user) {
   const rub = Number(d.RubriqueId);
   if (!emp || !rub) throw new Error("L'employé et la rubrique sont obligatoires.");
   const debut = isoDate(d.DateDebut);
-  const fin = isoDate(d.DateFin);
+  let fin = isoDate(d.DateFin);
   if (!debut) throw new Error('La date de début est obligatoire.');
   if (fin && fin < debut) throw new Error('La date de fin doit être postérieure ou égale à la date de début.');
 
-  const rInfo = (await db.query('SELECT Code, Libelle, Type, ModeCalcul, EstSysteme, Actif FROM paie.Rubrique WHERE Id = @id', { id: rub }))[0];
+  const rInfo = (await db.query('SELECT Code, Libelle, Type, ModeCalcul, Echelonne, EstSysteme, Actif FROM paie.Rubrique WHERE Id = @id', { id: rub }))[0];
   if (!rInfo || !rInfo.Actif || rInfo.EstSysteme || !['GAIN', 'RETENUE'].includes(rInfo.Type)) {
     throw new Error('Rubrique invalide, inactive ou système.');
   }
   const isPct = rInfo.ModeCalcul === 'POURCENTAGE';
-  const montant = isPct ? null : num(d.Montant);
+  // Remboursement de prêt : montant total + durée en mois → mensualité automatique, fin d'affectation = dernier mois du prêt
+  const isPret = !!rInfo.Echelonne && rInfo.Type === 'RETENUE';
+  let montant = isPct ? null : num(d.Montant);
   const taux = isPct ? num(d.Taux) : null;
-  if (isPct && (!(taux > 0) || taux > 100)) throw new Error('Le taux doit être compris entre 0 et 100 %.');
-  if (!isPct && !(montant > 0)) throw new Error('Le montant doit être supérieur à 0.');
+  let montantPret = null;
+  let dureeMois = null;
+  if (isPret) {
+    montantPret = Math.round(num(d.MontantPret));
+    dureeMois = Math.trunc(num(d.DureeMois));
+    if (!(montantPret > 0)) throw new Error('Le montant du prêt doit être supérieur à 0.');
+    if (!(dureeMois >= 1) || dureeMois > 120) throw new Error('La durée de remboursement doit être comprise entre 1 et 120 mois.');
+    if (montantPret < dureeMois) throw new Error('Le montant du prêt est trop faible pour cette durée (moins de 1 FCFA par mois).');
+    montant = rubriques.mensualitePret(montantPret, dureeMois, 0);
+    const y = Number(debut.slice(0, 4)); const m = Number(debut.slice(5, 7)) - 1 + dureeMois - 1;
+    fin = monthBounds(y + Math.floor(m / 12), (m % 12) + 1).fin;
+  } else {
+    if (isPct && (!(taux > 0) || taux > 100)) throw new Error('Le taux doit être compris entre 0 et 100 %.');
+    if (!isPct && !(montant > 0)) throw new Error('Le montant doit être supérieur à 0.');
+  }
 
   const id = d.Id ? Number(d.Id) : null;
   const chev = await db.query(`SELECT TOP 1 Id FROM paie.EmployeRubrique
@@ -297,15 +316,15 @@ async function saveEmployeRubrique(db, d, user) {
   const com = str(d.Commentaire, 200);
   if (id) {
     await db.query(`UPDATE paie.EmployeRubrique
-      SET EmployeId=@e, RubriqueId=@r, Montant=@m, Taux=@t, DateDebut=@debut, DateFin=@fin, Actif=@a, Commentaire=@c
+      SET EmployeId=@e, RubriqueId=@r, Montant=@m, Taux=@t, MontantPret=@mp, DureeMois=@dm, DateDebut=@debut, DateFin=@fin, Actif=@a, Commentaire=@c
       WHERE Id=@id`,
-      { e: emp, r: rub, m: montant, t: taux, debut, fin, a: d.Actif === false ? 0 : 1, c: com, id });
+      { e: emp, r: rub, m: montant, t: taux, mp: montantPret, dm: dureeMois, debut, fin, a: d.Actif === false ? 0 : 1, c: com, id });
   } else {
-    await db.query(`INSERT INTO paie.EmployeRubrique (EmployeId, RubriqueId, Montant, Taux, DateDebut, DateFin, Actif, Commentaire)
-      VALUES (@e,@r,@m,@t,@debut,@fin,1,@c)`,
-      { e: emp, r: rub, m: montant, t: taux, debut, fin, c: com });
+    await db.query(`INSERT INTO paie.EmployeRubrique (EmployeId, RubriqueId, Montant, Taux, MontantPret, DureeMois, DateDebut, DateFin, Actif, Commentaire)
+      VALUES (@e,@r,@m,@t,@mp,@dm,@debut,@fin,1,@c)`,
+      { e: emp, r: rub, m: montant, t: taux, mp: montantPret, dm: dureeMois, debut, fin, c: com });
   }
-  await audit(db, user, id ? 'MODIFICATION' : 'CREATION', 'EmployeRubrique', id, `emp ${emp} rub ${rInfo.Code} ${isPct ? taux + '%' : montant}`);
+  await audit(db, user, id ? 'MODIFICATION' : 'CREATION', 'EmployeRubrique', id, `emp ${emp} rub ${rInfo.Code} ${isPret ? 'prêt ' + montantPret + ' sur ' + dureeMois + ' mois' : (isPct ? taux + '%' : montant)}`);
 }
 
 async function closeEmployeRubrique(db, id, dateFin, user) {
@@ -415,15 +434,25 @@ async function calculerPeriode(db, periodeId, user) {
     for (const e of employes) {
       const lignes = await run(`
         SELECT r.Id AS RubriqueId, r.Code, r.Libelle, r.Type, r.ModeCalcul, r.Imposable, r.SoumisCotisation, r.SoumisCfceTrimf, r.PlafondExoneration, r.Ordre,
-               er.Montant, er.Taux
+               r.BaseRetenue, er.Montant, er.Taux, er.MontantPret, er.DureeMois, er.DateDebut
         FROM paie.EmployeRubrique er JOIN paie.Rubrique r ON r.Id = er.RubriqueId
         WHERE er.EmployeId=@id AND er.Actif=1 AND er.DateDebut<=@fin AND (er.DateFin IS NULL OR er.DateFin>=@debut)
         UNION ALL
         SELECT r.Id, r.Code, r.Libelle, r.Type, r.ModeCalcul, r.Imposable, r.SoumisCotisation, r.SoumisCfceTrimf, r.PlafondExoneration, r.Ordre,
-               ISNULL(v.Montant,0) AS Montant, NULL AS Taux
+               r.BaseRetenue, ISNULL(v.Montant,0) AS Montant, NULL AS Taux, NULL AS MontantPret, NULL AS DureeMois, NULL AS DateDebut
         FROM paie.VariablePaie v JOIN paie.Rubrique r ON r.Id = v.RubriqueId
         WHERE v.EmployeId=@id AND v.PeriodeId=@per`, { id: e.Id, debut, fin, per: periodeId });
 
+      // Prêts : la mensualité du mois (n/durée) remplace le montant ; hors durée du prêt, aucune retenue
+      for (let i = lignes.length - 1; i >= 0; i--) {
+        const l = lignes[i];
+        if (!(Number(l.MontantPret) > 0)) continue;
+        const dd = isoDate(l.DateDebut instanceof Date ? l.DateDebut.toISOString() : l.DateDebut);
+        const idx = (per.Annee * 12 + per.Mois) - (Number(dd.slice(0, 4)) * 12 + Number(dd.slice(5, 7)));
+        const mens = rubriques.mensualitePret(l.MontantPret, l.DureeMois, idx);
+        if (mens <= 0) { lignes.splice(i, 1); continue; }
+        l.Montant = mens; l.Libelle = `${l.Libelle} (${idx + 1}/${l.DureeMois})`;
+      }
       const sb = rub.SALBASE;
       lignes.unshift({ RubriqueId: sb.Id, Code: sb.Code, Libelle: sb.Libelle, Type: 'GAIN', ModeCalcul: 'AUTO', Imposable: true, SoumisCotisation: true, SoumisCfceTrimf: true, PlafondExoneration: 0, Ordre: sb.Ordre, Montant: Number(e.SalaireBase), Taux: null });
       // Absences non rémunérées approuvées : retenue = salaire de base / diviseur x jours, qui réduit le brut

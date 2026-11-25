@@ -39,6 +39,18 @@ function partSoumise(montant, plafond) {
 }
 
 /**
+ * Mensualité n° `idx` (0 = premier mois) d'un prêt de `montant` FCFA remboursé en `duree` mois :
+ * la part entière chaque mois, le reliquat d'arrondi sur la dernière échéance. 0 hors de la durée du prêt.
+ */
+function mensualitePret(montant, duree, idx) {
+  const m = Math.round(Number(montant) || 0);
+  const d = Math.trunc(Number(duree) || 0);
+  if (!(m > 0) || !(d > 0) || idx < 0 || idx >= d) return 0;
+  const base = Math.floor(m / d);
+  return idx === d - 1 ? m - base * (d - 1) : base;
+}
+
+/**
  * Calcule les montants résolus et les assiettes (brut, brutImposable/IR, brutCotisable/IPRES-CSS-IPM, brutCfceTrimf/CFCE-TRIMF, autresRetenues)
  * à partir des indicateurs propres à chaque rubrique.
  */
@@ -75,6 +87,10 @@ function calculerAssiettes(lignes, salaireBase = 0, params = null) {
   }
 
   const autresRetenues = retenues.reduce((s, r) => s + Number(r.Montant), 0);
+  // Retenue « sur le brut imposable » : elle est déduite AVANT l'impôt (elle réduit la base de l'IR) ;
+  // retenue « sur le net après impôt » (défaut) : elle n'est déduite que du net à payer.
+  const retenuesAvantImpot = retenues.filter((r) => r.BaseRetenue === 'BRUT_IMPOSABLE').reduce((s, r) => s + Number(r.Montant), 0);
+  brutImposable -= retenuesAvantImpot;
 
   return {
     gains,
@@ -84,7 +100,8 @@ function calculerAssiettes(lignes, salaireBase = 0, params = null) {
     brutCotisable: Math.max(0, brutCotisable),
     brutCfceTrimf: Math.max(0, brutCfceTrimf),
     autresRetenues,
+    retenuesAvantImpot,
   };
 }
 
-module.exports = { MODES_CALCUL, MODES_SAISIE, montantLigne, plafondExoneration, partSoumise, calculerAssiettes };
+module.exports = { MODES_CALCUL, MODES_SAISIE, BASES_RETENUE: ['NET_APRES_IMPOT', 'BRUT_IMPOSABLE'], mensualitePret, montantLigne, plafondExoneration, partSoumise, calculerAssiettes };
