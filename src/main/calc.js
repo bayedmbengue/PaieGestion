@@ -49,8 +49,9 @@ function impotAnnuel(revenuBrutAnnuel, nbParts, p) {
  * `cumul` (facultatif) = { nb, brutImposable, brutCfceTrimf, ir, trimf } : somme des bulletins déjà établis de l'année.
  * `regularisation` = true (mois de départ ou décembre) : la retenue peut être NÉGATIVE (remboursement du trop-perçu) ;
  *   sinon elle est plafonnée à 0, de sorte que le cumul retenu ne dépasse jamais l'impôt dû.
- * `sortie` = true (dernier bulletin d'un employé qui part) : l'IR dû est calculé sur le revenu réellement perçu dans l'année
- *   (paramètre IR_SORTIE_MODE : 1 = revenu réel [défaut], 2 = revenu moyen annualisé au prorata des mois).
+ * `sortie` = true (dernier bulletin d'un employé qui part) ou décembre : l'IR dû de l'année est calculé sur le revenu réellement perçu
+ *   dans l'année (paramètre IR_SORTIE_MODE : 1 = revenu réel [défaut], 2 = revenu moyen annualisé au prorata des mois).
+ *   Pour un salarié présent toute l'année, les deux méthodes donnent le même résultat.
  * Sans cumul (premier mois), le résultat est identique à l'ancien calcul mensuel.
  */
 function calculer({ brut, brutCotisable, brutImposable, brutCfceTrimf = brutImposable, estCadre, parts, partsTrimf = 1, autresRetenues = 0,
@@ -96,7 +97,7 @@ function calculer({ brut, brutCotisable, brutImposable, brutCfceTrimf = brutImpo
   const annualise = impotAnnuel(brutImposableCum / n * 12, nbParts, p);
   let irDuCumul = R(annualise.impot * n / 12);
   const modeSortie = p.has('IR_SORTIE_MODE') ? p.get('IR_SORTIE_MODE') : 1;
-  if (sortie && modeSortie === 1) irDuCumul = R(impotAnnuel(brutImposableCum, nbParts, p).impot);
+  if ((sortie || regularisation) && modeSortie === 1) irDuCumul = R(impotAnnuel(brutImposableCum, nbParts, p).impot);
 
   // TRIMF : barème sur le revenu ANNUEL (moyenne mensuelle x 12), montant annuel x parts TRIMF (1 ou 2), dû au prorata des mois.
   // La règle d'articulation avec l'IR est paramétrable (TRIMF_REGLE) car elle reste à confirmer :
