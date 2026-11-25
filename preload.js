@@ -4,7 +4,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 const CHANNELS = new Set([
   'auth:status', 'auth:createAdmin', 'auth:login', 'auth:logout',
-  'emp:list', 'emp:get', 'emp:save', 'emp:deactivate', 'emp:parts', 'rub:list', 'rub:all', 'rub:save',
+  'emp:list', 'emp:get', 'emp:save', 'emp:deactivate', 'emp:parts',
+  'rub:list', 'rub:all', 'rub:save', 'emprub:list', 'emprub:save', 'emprub:close', 'emprub:delete',
   'per:get', 'per:open', 'per:close', 'var:list', 'var:save', 'var:delete',
   'paie:calculer', 'paie:journal', 'paie:detail', 'paie:pdf', 'paie:csv',
   'params:list', 'params:save', 'params:delete', 'ent:get', 'ent:save',
@@ -13,6 +14,7 @@ const CHANNELS = new Set([
   'conge:types', 'conge:typeSave', 'conge:list', 'conge:jours', 'conge:save', 'conge:statut', 'conge:delete', 'conge:soldes', 'conge:soldeInit',
   'compta:ecritures', 'compta:reverser', 'compta:plan', 'compta:planSave', 'compta:rubriques', 'compta:rubSave', 'compta:params', 'compta:paramSave',
   'compta:csv', 'compta:virements',
+  'rapport:filters', 'rapport:data', 'rapport:csv', 'rapport:pdf',
   'app:info', 'app:openSetup',
 ]);
 
