@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'">
+<title>PaieGestion — Connexion SQL Server</title>
+<link rel="stylesheet" href="vendor/fonts/inter.css">
+<style>
+ body{margin:0;font-family:Inter,sans-serif;background:linear-gradient(135deg,#1B1F24,#2C333B);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1.5rem;box-sizing:border-box}
+ .card{background:#fff;border-radius:16px;padding:2rem;width:100%;max-width:560px;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+ h1{margin:0 0 .3rem;font-size:20px;color:#1A2B3C} p.sub{margin:0 0 1.2rem;color:#5A7A96;font-size:13px}
+ .g{display:grid;grid-template-columns:1fr 1fr;gap:.8rem} .f{display:flex;flex-direction:column;gap:4px} .full{grid-column:1/-1}
+ label{font-size:12px;color:#2D4A63;font-weight:500} input,select{padding:9px 11px;border:1px solid #A0BDD6;border-radius:8px;font-size:14px;font-family:inherit}
+ .chk{flex-direction:row;align-items:center;gap:8px;font-size:13px} .chk input{width:auto}
+ .row{display:flex;gap:.6rem;margin-top:1.2rem;flex-wrap:wrap} button{padding:10px 18px;border-radius:8px;border:1px solid #A0BDD6;background:#fff;font-size:14px;cursor:pointer;font-family:inherit}
+ button.p{background:#0D47A1;color:#fff;border-color:#0D47A1} button:disabled{opacity:.6;cursor:wait}
+ #msg{margin-top:1rem;padding:.7rem 1rem;border-radius:8px;font-size:13px;display:none;white-space:pre-wrap;line-height:1.45}
+ .ok{background:#E3F5EB;color:#1B6E3C}.err{background:#FDECEA;color:#B71C1C}.info{background:#E3F0FB;color:#0D47A1}
+ .hint{font-size:11px;color:#5A7A96}
+</style></head><body>
+<div class="card">
+ <h1>Connexion à SQL Server</h1>
+ <p class="sub">Indiquez le serveur qui hébergera la base PaieGestion. Le script PaieGestion_schema.sql doit avoir été exécuté sur cette base.</p>
+ <div class="g">
+  <div class="f"><label>Serveur (nom ou adresse IP)</label><input id="server" placeholder="localhost ou SRV-SQL01"></div>
+  <div class="f"><label>Port</label><input id="port" type="number" placeholder="1433"></div>
+  <div class="f"><label>Instance nommée (facultatif)</label><input id="instance" placeholder="SQLEXPRESS"></div>
+  <div class="f"><label>Base de données</label><input id="database" placeholder="PaieGestion"></div>
+  <div class="f full"><label>Authentification</label>
+   <select id="authType"><option value="sql">Compte SQL Server (login / mot de passe) — recommandé</option><option value="windows">Compte de domaine Windows (NTLM)</option></select></div>
+  <div class="f"><label>Utilisateur</label><input id="user" autocomplete="off"></div>
+  <div class="f"><label>Mot de passe</label><input id="password" type="password" autocomplete="off"></div>
+  <div class="f full" id="domWrap" style="display:none"><label>Domaine</label><input id="domain"></div>
+  <label class="f chk full"><input type="checkbox" id="encrypt"> Chiffrer la connexion (TLS)</label>
+  <label class="f chk full"><input type="checkbox" id="trust"> Faire confiance au certificat du serveur (serveur local / certificat auto-signé)</label>
+ </div>
+ <p class="hint">Le mot de passe est chiffré avec le coffre de votre session Windows. Si vous utilisez SQL Express, le protocole TCP/IP doit être activé.</p>
+ <div id="msg"></div>
+ <div class="row"><button id="test">Tester la connexion</button><button id="save" class="p">Enregistrer et démarrer</button></div>
+</div>
+<script src="web-shim.js"></script>
+<script src="setup.js"></script>
+</body></html>
