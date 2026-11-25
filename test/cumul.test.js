@@ -107,3 +107,15 @@ test('premier mois sans cumul : identique à l\'ancien calcul mensuel', () => {
   assert.equal(a.ir, b.ir);
   assert.equal(a.trimf, b.trimf);
 });
+
+test('agent arrivé le 01/11 : décembre régularise l\'IR sur les 2 mois réellement perçus (remboursement du trop retenu en novembre)', () => {
+  const res = simuler([{ mois: 11, brut: 500000 }, { mois: 12, brut: 500000 }]);
+  assert.equal(res[1].cumulIr, irAnnuel(1000000, 1));   // impôt annuel sur 1 000 000 perçus
+  assert.ok(res[1].ir < res[0].ir, 'décembre doit être inférieur à novembre');
+  assert.equal(res[1].regularisation, true);
+});
+
+test('agent arrivé le 01/11, IR_SORTIE_MODE = 2 : décembre = novembre (revenu annualisé au prorata)', () => {
+  const res = simuler([{ mois: 11, brut: 500000 }, { mois: 12, brut: 500000 }], {}, P([{ Code: 'IR_SORTIE_MODE', Valeur: 2 }]));
+  assert.ok(Math.abs(res[1].ir - res[0].ir) <= 1);
+});
