@@ -13,7 +13,7 @@ test('le script SQL fournit toutes les rubriques utilisées par le calcul', () =
   for (const c of RUB) assert.ok(schema.includes(`N'${c}'`), `rubrique absente du script : ${c}`);
 });
 
-function fakeDb(cumulsPrec = [], employe = {}) {
+function fakeDb(cumulsPrec = [], employe = {}, lignesUnion = null) {
   const inserted = { bulletins: [], lignes: [] };
   const params = [['IPRES_RG_SAL', 5.6], ['IPRES_RG_PAT', 8.4], ['IPRES_RG_PLAFOND', 432000], ['IPRES_RCC_SAL', 2.4], ['IPRES_RCC_PAT', 3.6],
     ['IPRES_RCC_PLAFOND', 1296000], ['CSS_PF_PAT', 7], ['CSS_ATMP_PAT', 1], ['CSS_PLAFOND', 63000], ['CFCE_PAT', 3], ['ABATTEMENT_IR', 30], ['ABATTEMENT_IR_PLAFOND', 900000],
@@ -29,7 +29,7 @@ function fakeDb(cumulsPrec = [], employe = {}) {
     if (/FROM paie\.BaremeTRIMF/.test(sql)) return [];
     if (/FROM paie\.Rubrique$/.test(sql.trim())) return rub;
     if (/FROM paie\.Employe e/.test(sql)) return [{ Id: 7, EstCadre: 0, NombreParts: 1, SituationFamiliale: 'C', ConjointTravaille: false, SalaireBase: 300000, ...employe }];
-    if (/UNION ALL/.test(sql)) return [
+    if (/UNION ALL/.test(sql)) return lignesUnion || [
       { RubriqueId: 11, Code: 'PRIME_TRANS', Libelle: 'Transport', Type: 'GAIN', Imposable: 1, SoumisCotisation: 1, Ordre: 30, Montant: 40000 },
       { RubriqueId: 12, Code: 'ABSENCE', Libelle: 'Absence', Type: 'RETENUE', Imposable: 0, SoumisCotisation: 0, Ordre: 420, Montant: 5000 },
     ];
@@ -85,4 +85,33 @@ test('calculerPeriode : tient compte des bulletins déjà établis (cumul annuel
   assert.equal(b.net, b.brut - b.ts - b.ir - b.trimf - 5000);
   assert.ok(db.inserted.lignes.some((l) => /régularisation de fin de contrat/.test(l.l)), 'ligne de régularisation absente du bulletin');
   assert.ok(b.bimp > 0 && b.bcf > 0, 'bruts imposables à conserver pour les cumuls des mois suivants');
+});
+
+const pret = (debut, extra = {}) => ({ RubriqueId: 13, Code: 'PRET', Libelle: 'Remboursement prêt', Type: 'RETENUE', Imposable: 0, SoumisCotisation: 0, Ordre: 410,
+  Montant: 83333, MontantPret: 1000000, DureeMois: 12, DateDebut: debut, BaseRetenue: 'NET_APRES_IMPOT', ...extra });
+
+test('prêt échelonné : la mensualité du mois (2/12) est retenue sur le bulletin de novembre', async () => {
+  const db = fakeDb([], {}, [pret('2026-10-01')]);
+  await repo.calculerPeriode(db, 1, { id: 1 });
+  const l = db.inserted.lignes.find((x) => /Remboursement prêt/.test(x.l));
+  assert.ok(l, 'ligne du prêt absente');
+  assert.equal(l.l, 'Remboursement prêt (2/12)');
+  assert.equal(l.ret, 83333);
+});
+
+test('prêt échelonné : aucune retenue avant le mois de début ni après la dernière échéance', async () => {
+  for (const debut of ['2026-12-01', '2025-10-01']) {                     // novembre 2026 : avant / après
+    const db = fakeDb([], {}, [pret(debut)]);
+    await repo.calculerPeriode(db, 1, { id: 1 });
+    assert.ok(!db.inserted.lignes.some((x) => /Remboursement prêt/.test(x.l)), `retenue inattendue pour un prêt débutant le ${debut}`);
+  }
+});
+
+test('retenue sur le brut imposable : l\'IR du mois est plus faible que pour une retenue sur le net', async () => {
+  const net = fakeDb([], { SalaireBase: 900000 }, [pret('2026-11-01')]);
+  const brut = fakeDb([], { SalaireBase: 900000 }, [pret('2026-11-01', { BaseRetenue: 'BRUT_IMPOSABLE' })]);
+  await repo.calculerPeriode(net, 1, { id: 1 });
+  await repo.calculerPeriode(brut, 1, { id: 1 });
+  assert.ok(brut.inserted.bulletins[0].ir < net.inserted.bulletins[0].ir, `IR ${brut.inserted.bulletins[0].ir} devrait être < ${net.inserted.bulletins[0].ir}`);
+  assert.equal(brut.inserted.bulletins[0].ar, net.inserted.bulletins[0].ar);   // même montant déduit du net
 });
