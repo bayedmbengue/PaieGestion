@@ -17,6 +17,7 @@ const state = {
   user: null, info: null, page: 'employes', annee: new Date().getFullYear(), mois: new Date().getMonth() + 1, periode: null,
   paramTab: 'param', congeTab: 'demandes', congeAnnee: new Date().getFullYear(), congeStatut: '', comptaTab: 'ecritures',
   rubTab: 'catalogue', rubType: '', rubQ: '', rubEmp: '', rubRub: '', rubActifOnly: true,
+  declTab: 'decl_ir', declAnnee: new Date().getFullYear(), declDebut: new Date().getMonth() + 1, declFin: new Date().getMonth() + 1,
   rapTab: 'journal', rapAnnee: new Date().getFullYear(), rapMois: new Date().getMonth() + 1,
   rapPerDebut: new Date().getMonth() + 1, rapPerFin: new Date().getMonth() + 1,
   rapAnnDebut: 1, rapAnnFin: 12,
@@ -114,7 +115,7 @@ function showLogin(needsAdmin, msg) {
 }
 
 // ───────────── Structure principale ─────────────
-const PAGES = [['employes', 'Employés'], ['rubriques', 'Rubriques de paie'], ['paie', 'Paie mensuelle'], ['conges', 'Congés & absences'], ['compta', 'Comptabilité'], ['rapports', 'Rapports'], ['params', 'Paramètres']];
+const PAGES = [['employes', 'Employés'], ['rubriques', 'Rubriques de paie'], ['paie', 'Paie mensuelle'], ['conges', 'Congés & absences'], ['compta', 'Comptabilité'], ['declarations', 'Déclarations'], ['rapports', 'Rapports'], ['params', 'Paramètres']];
 function showApp() {
   $('#root').innerHTML = `<div class="shell">
     <aside><div class="logo">PaieGestion<small>Sénégal</small></div>
@@ -132,7 +133,7 @@ function go(page) {
   state.page = page;
   document.querySelectorAll('[data-page]').forEach((b) => b.classList.toggle('on', b.dataset.page === page));
   $('#page').innerHTML = '<p class="muted">Chargement…</p>';
-  const fn = { employes: pageEmployes, rubriques: pageRubriques, paie: pagePaie, conges: pageConges, compta: pageCompta, rapports: pageRapports, params: pageParams }[page];
+  const fn = { employes: pageEmployes, rubriques: pageRubriques, paie: pagePaie, conges: pageConges, compta: pageCompta, declarations: pageDeclarations, rapports: pageRapports, params: pageParams }[page];
   guard(fn)();
 }
 
@@ -187,10 +188,10 @@ async function openEmploye(id) {
       ${inp('Banque', 'Banque', e.Banque || '')}${inp('N° de compte', 'NumeroCompte', e.NumeroCompte || '')}
     </div>
     <h4>Rubriques affectées (catalogue)</h4>
-    <p class="muted" style="margin:0 0 8px;font-size:12px">Sélectionnez les rubriques du catalogue actives pour cet employé. L'historique et la gestion complète se trouvent dans « Rubriques de paie ».</p>
+    <p class="muted" style="margin:0 0 8px;font-size:12px">Sélectionnez les rubriques du catalogue actives pour cet employé. L'historique et la gestion complète se trouvent dans « Rubriques de paie » (les prêts échelonnés s'y saisissent : montant + durée).</p>
     <div id="primes"></div>
     ${ro ? '' : `<div class="inline" style="margin-top:8px">
-      ${sel('Rubrique du catalogue', 'pr_rub', rubs.map((r) => [r.Id, `${r.Libelle} (${r.ModeCalcul === 'POURCENTAGE' ? '% base' : r.Type === 'RETENUE' ? 'retenue' : 'fixe'})`]), '')}
+      ${sel('Rubrique du catalogue', 'pr_rub', rubs.filter((r) => !r.Echelonne).map((r) => [r.Id, `${r.Libelle} (${r.ModeCalcul === 'POURCENTAGE' ? '% base' : r.Type === 'RETENUE' ? 'retenue' : 'fixe'})`]), '')}
       ${inp('Montant (FCFA)', 'pr_mt', '', 'number', 'min="0.01" step="any"')}
       ${inp('Début', 'pr_deb', e.DateEmbauche || today(), 'date')}
       ${inp('Fin (facultatif)', 'pr_fin', '', 'date')}
@@ -418,7 +419,7 @@ async function tabRubriquesCatalogue() {
       const g = r.Type === 'GAIN';
       const isSys = !!r.EstSysteme;
       return `<tr><td><b>${esc(r.Code)}</b>${isSys ? ' <span class="badge">Système</span>' : ''}</td><td>${esc(r.Libelle)}</td><td>${esc(TYPE_RUB[r.Type] || r.Type)}</td>
-        <td>${esc(MODE_RUB[r.ModeCalcul] || r.ModeCalcul || 'Montant fixe')}</td>
+        <td>${esc(MODE_RUB[r.ModeCalcul] || r.ModeCalcul || 'Montant fixe')}${r.Type === 'RETENUE' ? `<br><span class="muted">${r.BaseRetenue === 'BRUT_IMPOSABLE' ? 'sur brut imposable' : 'sur net après impôt'}${r.Echelonne ? ' · prêt échelonné' : ''}</span>` : ''}</td>
         <td>${g ? yes(r.Imposable) : '—'}</td><td>${g ? yes(r.SoumisCotisation) : '—'}</td><td>${g ? yes(r.SoumisCfceTrimf) : '—'}</td>
         <td class="n">${g && Number(r.PlafondExoneration) > 0 ? fmt(r.PlafondExoneration) : ''}</td>
         <td>${esc(r.CompteComptable || '')}</td><td class="n">${r.Ordre}</td>
@@ -429,7 +430,7 @@ async function tabRubriquesCatalogue() {
   };
 
   const edit = (r) => {
-    const v = r || { Type: 'GAIN', ModeCalcul: 'FIXE', Imposable: true, SoumisCotisation: true, SoumisCfceTrimf: true, Ordre: 100, CompteComptable: '', EstSysteme: false, Actif: true };
+    const v = r || { Type: 'GAIN', ModeCalcul: 'FIXE', BaseRetenue: 'NET_APRES_IMPOT', Echelonne: false, Imposable: true, SoumisCotisation: true, SoumisCfceTrimf: true, Ordre: 100, CompteComptable: '', EstSysteme: false, Actif: true };
     const isSys = !!(r && v.EstSysteme);
     openModal({
       title: r ? `Rubrique ${v.Code}` : 'Nouvelle rubrique', wide: true,
@@ -446,6 +447,10 @@ async function tabRubriquesCatalogue() {
           ${chk('Soumise à la CFCE et à la TRIMF', 'SoumisCfceTrimf', v.SoumisCfceTrimf !== undefined ? v.SoumisCfceTrimf : v.Imposable)}
           ${inp("Plafond d'exonération mensuel (FCFA, vide = aucun)", 'PlafondExoneration', Number(v.PlafondExoneration) > 0 ? v.PlafondExoneration : '', 'number', 'min="0" step="1"')}
         </div>
+        <div id="rret" class="grid two span2" style="${v.Type === 'RETENUE' && !isSys ? '' : 'display:none'}">
+          ${sel('La retenue est appliquée sur…', 'BaseRetenue', [['NET_APRES_IMPOT', 'le net après impôt (déduite du net à payer)'], ['BRUT_IMPOSABLE', 'le brut imposable (réduit la base de calcul de l\'IR)']], v.BaseRetenue || 'NET_APRES_IMPOT')}
+          ${chk('Remboursement échelonné (prêt) : montant total + durée en mois', 'Echelonne', v.Echelonne)}
+        </div>
         ${!isSys && r ? chk('Rubrique active', 'Actif', v.Actif) : ''}
         ${isSys ? '<p class="muted span2">Rubrique système utilisée par le moteur de calcul : seuls le libellé, l\'ordre et le compte comptable sont modifiables.</p>' : ''}
       </div></form>`,
@@ -458,7 +463,7 @@ async function tabRubriquesCatalogue() {
       }],
       onOpen: (root) => {
         const typeSel = $('[name=Type]', root);
-        if (typeSel) typeSel.addEventListener('change', () => { $('#rgain', root).style.display = typeSel.value === 'GAIN' ? '' : 'none'; });
+        if (typeSel) typeSel.addEventListener('change', () => { $('#rgain', root).style.display = typeSel.value === 'GAIN' ? '' : 'none'; $('#rret', root).style.display = typeSel.value === 'RETENUE' ? '' : 'none'; });
       },
     });
   };
@@ -487,7 +492,7 @@ async function tabRubriquesAffectations() {
     <div class="tw"><table><thead><tr><th>Employé</th><th>Rubrique</th><th>Mode</th><th class="n">Valeur</th><th>Du</th><th>Au</th><th>Commentaire</th><th></th></tr></thead><tbody>
       ${rows.map((r) => {
         const closed = r.DateFin && r.DateFin < tday;
-        const val = r.ModeCalcul === 'POURCENTAGE' ? `${esc(String(r.Taux).replace('.', ','))} %` : `${fmt(r.Montant)} FCFA`;
+        const val = r.MontantPret > 0 ? `${fmt(r.MontantPret)} FCFA sur ${r.DureeMois} mois<br><span class="muted">${fmt(r.Montant)} FCFA / mois</span>` : (r.ModeCalcul === 'POURCENTAGE' ? `${esc(String(r.Taux).replace('.', ','))} %` : `${fmt(r.Montant)} FCFA`);
         return `<tr><td><b>${esc(r.Nom)}</b> ${esc(r.Prenom)} <span class="muted">${esc(r.Matricule)}</span></td>
           <td>${esc(r.Rubrique)} <span class="muted">${esc(r.RubriqueCode)}</span>${r.Type === 'RETENUE' ? ' <span class="badge warn">Retenue</span>' : ''}</td>
           <td>${esc(MODE_RUB[r.ModeCalcul] || r.ModeCalcul)}</td>
@@ -506,6 +511,11 @@ async function tabRubriquesAffectations() {
         ${sel('Employé *', 'EmployeId', emps.map((e) => [e.Id, `${e.Nom} ${e.Prenom} (${e.Matricule})`]), v.EmployeId)}
         ${sel('Rubrique *', 'RubriqueId', rubs.map((x) => [x.Id, `${x.Libelle} — ${MODE_RUB[x.ModeCalcul] || x.ModeCalcul}`]), v.RubriqueId)}
         <div id="aff_mt">${inp('Montant mensuel (FCFA) *', 'Montant', v.Montant != null ? v.Montant : '', 'number', 'min="1" step="1"')}</div>
+        <div id="aff_pret" class="grid two span2" style="display:none">
+          ${inp('Montant du prêt (FCFA) *', 'MontantPret', v.MontantPret != null ? v.MontantPret : '', 'number', 'min="1" step="1"')}
+          ${inp('Durée de remboursement (mois) *', 'DureeMois', v.DureeMois != null ? v.DureeMois : '', 'number', 'min="1" max="120" step="1"')}
+          <p class="muted span2" id="aff_pret_info" style="margin:0"></p>
+        </div>
         <div id="aff_tx">${inp('Taux (% du salaire de base) *', 'Taux', v.Taux != null ? v.Taux : '', 'number', 'min="0.01" max="100" step="0.01"')}</div>
         ${inp('Date de début *', 'DateDebut', v.DateDebut, 'date', 'required')}
         ${inp('Date de fin (vide = en cours)', 'DateFin', v.DateFin || '', 'date')}
@@ -522,10 +532,19 @@ async function tabRubriquesAffectations() {
         const sync = () => {
           const cur = rubs.find((x) => String(x.Id) === $('[name=RubriqueId]', root).value);
           const isPct = cur && cur.ModeCalcul === 'POURCENTAGE';
-          $('#aff_mt', root).style.display = isPct ? 'none' : '';
+          const isPret = !!(cur && cur.Echelonne && cur.Type === 'RETENUE');
+          $('#aff_mt', root).style.display = isPct || isPret ? 'none' : '';
           $('#aff_tx', root).style.display = isPct ? '' : 'none';
-          $('[name=Montant]', root).required = !isPct;
+          $('#aff_pret', root).style.display = isPret ? '' : 'none';
+          $('[name=Montant]', root).required = !isPct && !isPret;
           $('[name=Taux]', root).required = !!isPct;
+          $('[name=MontantPret]', root).required = isPret;
+          $('[name=DureeMois]', root).required = isPret;
+          const info = () => {
+            const mt = Number($('[name=MontantPret]', root).value); const du = Number($('[name=DureeMois]', root).value);
+            $('#aff_pret_info', root).textContent = mt > 0 && du > 0 ? `Mensualité : ${fmt(Math.floor(mt / du))} FCFA pendant ${du} mois (dernier mois : ${fmt(mt - Math.floor(mt / du) * (du - 1))} FCFA). Déduite chaque mois à partir du mois de la date de début ; la date de fin est calculée automatiquement.` : '';
+          };
+          $('[name=MontantPret]', root).oninput = info; $('[name=DureeMois]', root).oninput = info; info();
         };
         $('[name=RubriqueId]', root).addEventListener('change', sync);
         sync();
@@ -831,6 +850,51 @@ function renderRapTable(columns, rows, totals, emptyMsg, maxHeight = '') {
       + (totals ? `<tr class="tot">${columns.map((c) => `<td class="${c.align === 'n' ? 'n' : ''}">${totals[c.key] === undefined ? '' : esc(fmtRapCell(c, totals[c.key]))}</td>`).join('')}</tr>` : '')
     : `<tr><td colspan="${columns.length}" class="empty">${esc(emptyMsg || 'Aucune donnée.')}</td></tr>`;
   return `<div class="tw" ${maxHeight ? `style="max-height:${maxHeight}"` : ''}><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+// ───────────── Déclarations sur salaires ─────────────
+const DECLS = [['decl_ir', 'Impôt sur le revenu'], ['decl_trimf', 'TRIMF'], ['decl_cfce', 'CFCE'], ['decl_ipres_css', 'IPRES & CSS'], ['decl_ipm', 'IPM'], ['decl_1024', 'État 1024 (annuel)']];
+const DECL_AIDE = {
+  decl_ir: 'IR retenu sur les salaires de la période, à reverser à la DGID.',
+  decl_trimf: 'TRIMF retenue sur les salaires de la période, à reverser à la DGID.',
+  decl_cfce: 'Contribution à la charge de l\'employeur, calculée sur la masse salariale soumise.',
+  decl_ipres_css: 'Cotisations salariales et patronales IPRES (régime général et cadres) et cotisations patronales CSS (prestations familiales, accidents du travail).',
+  decl_ipm: 'Cotisations salariales et patronales à l\'institut de prévoyance maladie.',
+  decl_1024: 'État récapitulatif annuel des salaires versés : choisissez l\'exercice. La mise en forme officielle de la DGID est à vérifier avant dépôt.',
+};
+const declPayload = (tab) => (tab === 'decl_1024' ? { annee: state.declAnnee, moisDebut: 1, moisFin: 12 } : { annee: state.declAnnee, moisDebut: state.declDebut, moisFin: state.declFin });
+
+async function pageDeclarations() {
+  const tab = state.declTab;
+  const moisOpts = (sel) => MOIS.map((m, i) => `<option value="${i + 1}" ${i + 1 === sel ? 'selected' : ''}>${m}</option>`).join('');
+  const annuel = tab === 'decl_1024';
+  $('#page').innerHTML = `
+    <div class="tabs">${DECLS.map(([id, t]) => `<button data-dtab="${id}" class="${tab === id ? 'on' : ''}">${t}</button>`).join('')}</div>
+    <div class="bar">
+      <input id="da" type="number" value="${state.declAnnee}" min="2000" max="2100" title="Année">
+      ${annuel ? '' : `<label class="muted">de</label><select id="dm1" title="Mois de début">${moisOpts(state.declDebut)}</select><label class="muted">à</label><select id="dm2" title="Mois de fin">${moisOpts(state.declFin)}</select>`}
+      <span class="sp"></span>
+      ${can('export') ? '<button id="d_csv">Exporter CSV</button><button class="p" id="d_pdf">Exporter PDF</button>' : ''}
+    </div>
+    <p class="muted" style="margin:4px 0 8px">${esc(DECL_AIDE[tab])}</p>
+    <div id="d_body"><p class="muted">Chargement…</p></div>`;
+  document.querySelectorAll('[data-dtab]').forEach((b) => { b.onclick = () => { state.declTab = b.dataset.dtab; guard(pageDeclarations)(); }; });
+
+  const refresh = guard(async () => {
+    $('#d_body').innerHTML = '<p class="muted">Chargement…</p>';
+    const rep = await api('rapport:data', tab, declPayload(tab));
+    const kpis = rep.kpis && rep.kpis.length ? `<div class="kpis">${rep.kpis.map((k) => `<div class="kpi ${esc(k.tone || '')}"><div class="kl">${esc(k.label)}</div><div class="kv">${esc(k.value)}</div></div>`).join('')}</div>` : '';
+    const sec = rep.secondaryTable && rep.secondaryTable.rows && rep.secondaryTable.rows.length
+      ? `<h3 class="rap-sec">${esc(rep.secondaryTable.title)}</h3>${renderRapTable(rep.secondaryTable.columns, rep.secondaryTable.rows, rep.secondaryTable.totals, '', 'none')}` : '';
+    $('#d_body').innerHTML = `<div class="bar" style="margin-bottom:8px"><h2>${esc(rep.title)}</h2></div><p class="rap-sub">${esc(rep.subtitle)}</p>${kpis}${renderRapTable(rep.columns, rep.rows, rep.totals, rep.emptyMessage)}${sec}`;
+  });
+  $('#da').onchange = () => { state.declAnnee = Number($('#da').value) || state.declAnnee; refresh(); };
+  if ($('#dm1')) $('#dm1').onchange = () => { state.declDebut = Number($('#dm1').value); if (state.declFin < state.declDebut) { state.declFin = state.declDebut; $('#dm2').value = state.declFin; } refresh(); };
+  if ($('#dm2')) $('#dm2').onchange = () => { state.declFin = Number($('#dm2').value); if (state.declDebut > state.declFin) { state.declDebut = state.declFin; $('#dm1').value = state.declDebut; } refresh(); };
+  const exp = (id, ch, msg) => { if ($(id)) $(id).onclick = guard(async () => { const btn = $(id); btn.disabled = true; try { const r = await api(ch, tab, declPayload(tab)); if (r.saved) toast(msg); } finally { btn.disabled = false; } }); };
+  exp('#d_csv', 'rapport:csv', 'Fichier CSV enregistré.');
+  exp('#d_pdf', 'rapport:pdf', 'PDF enregistré.');
+  await refresh();
 }
 
 function rapFiltersPayload(tab) {
