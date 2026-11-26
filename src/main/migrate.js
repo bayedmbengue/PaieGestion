@@ -3,8 +3,8 @@
 /** Vérifie que le schéma « paie » (script PaieGestion_schema.sql) existe, et ajoute les compléments de cette application. */
 // Réduction d'impôt pour charges de famille : [parts, taux %, minimum, maximum] — À CONFIRMER (voir README).
 const REDUCTION_FAMILLE = [
-  [1.5, 10, 100000, 300000], [2, 15, 200000, 650000], [2.5, 20, 300000, 1100000], [3, 25, 400000, 1380000],
-  [3.5, 30, 500000, 1860000], [4, 35, 600000, 2200000], [4.5, 40, 700000, 2540000], [5, 45, 800000, 3180000],
+  [1.5, 10, 100000, 300000], [2, 15, 200000, 650000], [2.5, 20, 300000, 1100000], [3, 25, 400000, 1650000],
+  [3.5, 30, 500000, 2030000], [4, 35, 600000, 2490000], [4.5, 40, 700000, 2755000], [5, 45, 800000, 3180000],
 ];
 const reductionSql = () => {
   const vals = [];
@@ -53,6 +53,7 @@ const MIGRATION02 = path.join(__dirname, '..', '..', 'sql', 'migration_02.sql');
 const MIGRATION03 = path.join(__dirname, '..', '..', 'sql', 'migration_03.sql');
 const MIGRATION04 = path.join(__dirname, '..', '..', 'sql', 'migration_04.sql');
 const MIGRATION05 = path.join(__dirname, '..', '..', 'sql', 'migration_05.sql');
+const MIGRATION06 = path.join(__dirname, '..', '..', 'sql', 'migration_06.sql');
 
 /** Crée les tables/colonnes des congés, catégories et comptabilité si elles manquent (nécessite le droit de créer des tables). */
 async function ensureMigration02(db) {
@@ -103,6 +104,20 @@ async function ensureMigration04(db) {
 }
 
 /** Ajoute la base de retenue (brut imposable / net après impôt) et le remboursement de prêt échelonné. */
+/** Corrige les plafonds de la réduction d'impôt pour charges de famille (barème fourni : 3 / 3,5 / 4 / 4,5 parts). */
+async function ensureMigration06(db) {
+  const attendu = REDUCTION_FAMILLE.map(([n, , , maxi]) => `(N'RED_FAM_${n}_MAX', ${maxi})`).join(',');
+  const r = (await db.query(`SELECT COUNT(*) AS n FROM paie.ParametreLegal p JOIN (VALUES ${attendu}) v(Code, Maxi) ON v.Code = p.Code
+    WHERE p.DateFin IS NULL AND p.Valeur <> v.Maxi`))[0];
+  if (!r.n) return;
+  try {
+    await db.batch(fs.readFileSync(MIGRATION06, 'utf8'));
+  } catch (e) {
+    throw new Error("Une mise à jour de la base est nécessaire (barème des charges de famille). Dans SSMS : sélectionnez la base « " + db.cfg.database +
+      " », ouvrez le fichier « migration_06.sql » (dossier « sql » de PaieGestion), exécutez-le, puis relancez PaieGestion. (" + e.message + ')');
+  }
+}
+
 async function ensureMigration05(db) {
   const r = (await db.query(`SELECT COL_LENGTH(N'paie.Rubrique', N'BaseRetenue') AS a, COL_LENGTH(N'paie.Rubrique', N'Echelonne') AS b,
     COL_LENGTH(N'paie.EmployeRubrique', N'MontantPret') AS c, COL_LENGTH(N'paie.EmployeRubrique', N'DureeMois') AS d`))[0];
@@ -224,6 +239,7 @@ WHERE b.DateFin IS NULL AND b.Verifie = 0;
   await ensureMigration03(db);
   await ensureMigration04(db);
   await ensureMigration05(db);
+  await ensureMigration06(db);
 }
 
-module.exports = { ensureSchema, ensureMigration03, ensureMigration04, MIGRATION04, ensureMigration05, MIGRATION05, REDUCTION_FAMILLE, reductionSql, IPM_SQL, seed02Sql, MIGRATION02, MIGRATION03, COMPTES_RUBRIQUES, PARAMS_COMPTA };
+module.exports = { ensureSchema, ensureMigration03, ensureMigration04, MIGRATION04, ensureMigration05, MIGRATION05, ensureMigration06, MIGRATION06, REDUCTION_FAMILLE, reductionSql, IPM_SQL, seed02Sql, MIGRATION02, MIGRATION03, COMPTES_RUBRIQUES, PARAMS_COMPTA };
