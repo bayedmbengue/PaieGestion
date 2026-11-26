@@ -119,3 +119,9 @@ test('agent arrivé le 01/11, IR_SORTIE_MODE = 2 : décembre = novembre (revenu 
   const res = simuler([{ mois: 11, brut: 500000 }, { mois: 12, brut: 500000 }], {}, P([{ Code: 'IR_SORTIE_MODE', Valeur: 2 }]));
   assert.ok(Math.abs(res[1].ir - res[0].ir) <= 1);
 });
+
+test('réduction pour charges de famille : barème fourni (3,5 parts → plafond 2 030 000) : IR = 403 494 sur 1 723 527 imposables', () => {
+  assert.equal(Math.round(impotAnnuel(1723527 * 12, 3.5, P()).impot / 12), 403494);
+  const maxi = { 3: 1650000, 3.5: 2030000, 4: 2490000, 4.5: 2755000, 5: 3180000 };
+  for (const [parts, m] of Object.entries(maxi)) assert.equal(P().get(`RED_FAM_${parts}_MAX`), m);
+});
