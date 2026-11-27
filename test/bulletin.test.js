@@ -23,3 +23,21 @@ test('le bulletin contient les montants et échappe le HTML', () => {
   assert.doesNotMatch(html, /<SARL>/);
   assert.match(html, /5,6 %/);
 });
+
+test('rubrique proratisée : le taux est affiché en jours travaillés (15 j), pas en pourcentage', () => {
+  const data = {
+    periode: { Annee: 2026, Mois: 11 }, entreprise: { Nom: 'ACME' },
+    bulletins: [{
+      Nom: 'DIOP', Prenom: 'Awa', Matricule: 'M001', DateEmbauche: '2024-03-01', SituationFamiliale: 'M', NombreEnfants: 2, NombreParts: 2.5, EstCadre: 0,
+      ModePaiement: 'VIREMENT', Brut: 74135, TotalCotisSalariales: 0, ImpotRevenu: 0, TRIMF: 0, AutresRetenues: 0, Net: 74135, TotalCotisPatronales: 0, CoutEmployeur: 74135,
+      lignes: [
+        { Libelle: 'Salaire de base', Base: 128500, Taux: 15, TauxEnJours: 1, MontantGain: 74135, MontantRetenue: 0, MontantPatronal: 0 },
+        { Libelle: 'IPRES', Base: 300000, Taux: 5.6, TauxEnJours: 0, MontantGain: 0, MontantRetenue: 16800, MontantPatronal: 0 },
+      ],
+    }],
+  };
+  const html = bulletinsDocument(data);
+  assert.match(html, /15 j/);
+  assert.doesNotMatch(html, /15 %/);
+  assert.match(html, /5,6 %/);
+});
