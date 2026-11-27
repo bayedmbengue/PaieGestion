@@ -127,3 +127,12 @@ test('calculerPeriode : jours travaillés saisis → salaire de base proratisé 
   const t = db.inserted.lignes.find((x) => /transport/i.test(x.l));
   assert.equal(t.g, 40000);                           // rubrique non marquée « proratisée » : montant plein
 });
+
+test('calculerPeriode : rubrique affectée ET variable du mois → une seule ligne sur le bulletin, au montant de la variable', async () => {
+  const base = { RubriqueId: 11, Code: 'PRIME_TRANS', Libelle: 'Transport', Type: 'GAIN', Imposable: 1, SoumisCotisation: 1, Ordre: 30 };
+  const db = fakeDb([], {}, [{ ...base, Montant: 26000, EstVariable: 0 }, { ...base, Montant: 10000, EstVariable: 1 }]);
+  await repo.calculerPeriode(db, 1, { id: 1 });
+  const lignes = db.inserted.lignes.filter((x) => /transport/i.test(x.l));
+  assert.equal(lignes.length, 1, 'la rubrique ne doit apparaître qu\'une fois');
+  assert.equal(lignes[0].g, 10000);
+});
