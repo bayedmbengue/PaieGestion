@@ -6,7 +6,7 @@ const CHANNELS = new Set([
   'auth:status', 'auth:createAdmin', 'auth:login', 'auth:logout',
   'emp:list', 'emp:get', 'emp:save', 'emp:deactivate', 'emp:parts',
   'rub:list', 'rub:all', 'rub:save', 'emprub:list', 'emprub:save', 'emprub:close', 'emprub:delete',
-  'per:get', 'per:open', 'per:close', 'var:list', 'var:save', 'var:delete',
+  'per:get', 'per:open', 'per:close', 'var:list', 'var:save', 'var:delete', 'pres:list', 'pres:save', 'pres:delete',
   'paie:calculer', 'paie:journal', 'paie:detail', 'paie:pdf', 'paie:csv',
   'params:list', 'params:save', 'params:delete', 'ent:get', 'ent:save',
   'users:list', 'users:create', 'users:setActive', 'users:resetPassword',
