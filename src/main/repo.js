@@ -163,7 +163,7 @@ const listRubriquesSaisie = (db) => db.query(
 // ───────────────────────── Rubriques de paie ─────────────────────────
 const listRubriques = (db) => db.query(`
   SELECT r.Id, r.Code, r.Libelle, r.Type, r.ModeCalcul, r.Imposable, r.SoumisCotisation, r.SoumisCfceTrimf,
-         r.PlafondExoneration, r.BaseRetenue, r.Echelonne, r.Ordre, r.CompteComptable, r.EstSysteme, r.Actif
+         r.PlafondExoneration, r.BaseRetenue, r.Echelonne, r.ProrataJours, r.Ordre, r.CompteComptable, r.EstSysteme, r.Actif
   FROM paie.Rubrique r ORDER BY r.Ordre, r.Id`);
 
 /** Plafond d'exonération mensuel (ParametreLegal EXO_<CODE> tenu synchronisé s'il existe déjà). */
@@ -211,11 +211,12 @@ async function saveRubrique(db, d, user) {
       const plafond = gain ? exoValue(d.PlafondExoneration) : null;
       const baseRet = !gain && rubriques.BASES_RETENUE.includes(d.BaseRetenue) ? d.BaseRetenue : 'NET_APRES_IMPOT';
       const echel = !gain && d.Echelonne ? 1 : 0;
+      const prorata = gain && d.ProrataJours ? 1 : 0;
       await db.query(`UPDATE paie.Rubrique
         SET Libelle=@l, ModeCalcul=@mc, Imposable=@i, SoumisCotisation=@s, SoumisCfceTrimf=@cf,
-            PlafondExoneration=@pl, BaseRetenue=@br, Echelonne=@ec, Ordre=@o, CompteComptable=@cc, Actif=@a
+            PlafondExoneration=@pl, BaseRetenue=@br, Echelonne=@ec, ProrataJours=@pj, Ordre=@o, CompteComptable=@cc, Actif=@a
         WHERE Id=@id`,
-        { l: libelle, mc: mode, i: imp, s: cotis, cf: cfce, pl: plafond, br: baseRet, ec: echel, o: ordre, cc: compte, a: d.Actif === false ? 0 : 1, id });
+        { l: libelle, mc: mode, i: imp, s: cotis, cf: cfce, pl: plafond, br: baseRet, ec: echel, pj: prorata, o: ordre, cc: compte, a: d.Actif === false ? 0 : 1, id });
       if (gain && d.PlafondExoneration !== undefined) await syncExonerationParam(db, cur.Code, plafond);
     } else {
       // rubrique système : seuls le libellé, l'ordre et le compte comptable sont modifiables
@@ -236,13 +237,14 @@ async function saveRubrique(db, d, user) {
   const plafond = gain ? exoValue(d.PlafondExoneration) : null;
   const baseRet = !gain && rubriques.BASES_RETENUE.includes(d.BaseRetenue) ? d.BaseRetenue : 'NET_APRES_IMPOT';
   const echel = !gain && d.Echelonne ? 1 : 0;
+  const prorata = gain && d.ProrataJours ? 1 : 0;
   let newId = null;
   try {
     const ins = await db.query(`INSERT INTO paie.Rubrique
-      (Code, Libelle, Type, ModeCalcul, Imposable, SoumisCotisation, SoumisCfceTrimf, PlafondExoneration, BaseRetenue, Echelonne, Ordre, CompteComptable, EstSysteme)
+      (Code, Libelle, Type, ModeCalcul, Imposable, SoumisCotisation, SoumisCfceTrimf, PlafondExoneration, BaseRetenue, Echelonne, ProrataJours, Ordre, CompteComptable, EstSysteme)
       OUTPUT INSERTED.Id
-      VALUES (@c,@l,@t,@mc,@i,@s,@cf,@pl,@br,@ec,@o,@cc,0)`,
-      { c: code, l: libelle, t: d.Type, mc: mode, i: imp, s: cotis, cf: cfce, pl: plafond, br: baseRet, ec: echel, o: ordre, cc: compte });
+      VALUES (@c,@l,@t,@mc,@i,@s,@cf,@pl,@br,@ec,@pj,@o,@cc,0)`,
+      { c: code, l: libelle, t: d.Type, mc: mode, i: imp, s: cotis, cf: cfce, pl: plafond, br: baseRet, ec: echel, pj: prorata, o: ordre, cc: compte });
     newId = ins[0] ? ins[0].Id : null;
     if (newId && compte) await syncCompteRubrique(db, newId, d.Type, compte);
   } catch (err) {
@@ -391,6 +393,30 @@ async function deleteVariable(db, id, periodeId, user) {
   await audit(db, user, 'SUPPRESSION', 'VariablePaie', id, null);
 }
 
+// Jours travaillés par employé et par période (vide = mois complet) : proratisation des rubriques « ProrataJours »
+const listPresences = (db, periodeId) => db.query(`
+  SELECT pr.EmployeId, e.Matricule, e.Nom, e.Prenom, pr.JoursTravailles
+  FROM paie.PresencePeriode pr JOIN paie.Employe e ON e.Id = pr.EmployeId
+  WHERE pr.PeriodeId = @p ORDER BY e.Nom, e.Prenom`, { p: periodeId });
+
+async function savePresence(db, d, user) {
+  await assertOuverte(db, d.PeriodeId);
+  const j = Math.round(num(d.JoursTravailles) * 2) / 2;
+  if (!(j >= 0 && j <= 31)) throw new Error('Jours travaillés : un nombre entre 0 et 31 (demi-journées acceptées).');
+  const k = { e: Number(d.EmployeId), p: Number(d.PeriodeId), j };
+  await db.query(`MERGE paie.PresencePeriode AS t USING (SELECT @e AS EmployeId, @p AS PeriodeId) AS s
+    ON t.EmployeId = s.EmployeId AND t.PeriodeId = s.PeriodeId
+    WHEN MATCHED THEN UPDATE SET JoursTravailles = @j
+    WHEN NOT MATCHED THEN INSERT (EmployeId, PeriodeId, JoursTravailles) VALUES (@e, @p, @j);`, k);
+  await audit(db, user, 'MODIFICATION', 'PresencePeriode', null, `emp ${k.e} période ${k.p} : ${j} jours`);
+}
+
+async function deletePresence(db, employeId, periodeId, user) {
+  await assertOuverte(db, periodeId);
+  await db.query('DELETE FROM paie.PresencePeriode WHERE EmployeId=@e AND PeriodeId=@p', { e: employeId, p: periodeId });
+  await audit(db, user, 'SUPPRESSION', 'PresencePeriode', null, `emp ${employeId} période ${periodeId}`);
+}
+
 // ───────────────────────── Calcul de la paie ─────────────────────────
 async function loadParams(run, dateIso) {
   const rows = await run('SELECT Code, Valeur FROM paie.ParametreLegal WHERE DateDebut<=@d AND (DateFin IS NULL OR DateFin>=@d) ORDER BY DateDebut', { d: dateIso });
@@ -431,14 +457,17 @@ async function calculerPeriode(db, periodeId, user) {
       WHERE pp.Annee = @annee AND pp.Mois < @mois GROUP BY b.EmployeId`, { annee: per.Annee, mois: per.Mois }))
       .map((x) => [x.EmployeId, { nb: Number(x.Nb), brutImposable: Number(x.BrutImposable), brutCfceTrimf: Number(x.BrutCfceTrimf), ir: Number(x.Ir), trimf: Number(x.Trimf) }]));
 
+    // Jours travaillés du mois par employé (absent = mois complet, aucune proratisation)
+    const presences = new Map((await run('SELECT EmployeId, JoursTravailles FROM paie.PresencePeriode WHERE PeriodeId = @per', { per: periodeId })).map((x) => [x.EmployeId, Number(x.JoursTravailles)]));
+
     for (const e of employes) {
       const lignes = await run(`
-        SELECT r.Id AS RubriqueId, r.Code, r.Libelle, r.Type, r.ModeCalcul, r.Imposable, r.SoumisCotisation, r.SoumisCfceTrimf, r.PlafondExoneration, r.Ordre,
+        SELECT r.Id AS RubriqueId, r.Code, r.Libelle, r.Type, r.ModeCalcul, r.Imposable, r.SoumisCotisation, r.SoumisCfceTrimf, r.PlafondExoneration, r.Ordre, r.ProrataJours,
                r.BaseRetenue, er.Montant, er.Taux, er.MontantPret, er.DureeMois, er.DateDebut
         FROM paie.EmployeRubrique er JOIN paie.Rubrique r ON r.Id = er.RubriqueId
         WHERE er.EmployeId=@id AND er.Actif=1 AND er.DateDebut<=@fin AND (er.DateFin IS NULL OR er.DateFin>=@debut)
         UNION ALL
-        SELECT r.Id, r.Code, r.Libelle, r.Type, r.ModeCalcul, r.Imposable, r.SoumisCotisation, r.SoumisCfceTrimf, r.PlafondExoneration, r.Ordre,
+        SELECT r.Id, r.Code, r.Libelle, r.Type, r.ModeCalcul, r.Imposable, r.SoumisCotisation, r.SoumisCfceTrimf, r.PlafondExoneration, r.Ordre, r.ProrataJours,
                r.BaseRetenue, ISNULL(v.Montant,0) AS Montant, NULL AS Taux, NULL AS MontantPret, NULL AS DureeMois, NULL AS DateDebut
         FROM paie.VariablePaie v JOIN paie.Rubrique r ON r.Id = v.RubriqueId
         WHERE v.EmployeId=@id AND v.PeriodeId=@per`, { id: e.Id, debut, fin, per: periodeId });
@@ -454,7 +483,7 @@ async function calculerPeriode(db, periodeId, user) {
         l.Montant = mens; l.Libelle = `${l.Libelle} (${idx + 1}/${l.DureeMois})`;
       }
       const sb = rub.SALBASE;
-      lignes.unshift({ RubriqueId: sb.Id, Code: sb.Code, Libelle: sb.Libelle, Type: 'GAIN', ModeCalcul: 'AUTO', Imposable: true, SoumisCotisation: true, SoumisCfceTrimf: true, PlafondExoneration: 0, Ordre: sb.Ordre, Montant: Number(e.SalaireBase), Taux: null });
+      lignes.unshift({ RubriqueId: sb.Id, Code: sb.Code, Libelle: sb.Libelle, Type: 'GAIN', ModeCalcul: 'AUTO', Imposable: true, SoumisCotisation: true, SoumisCfceTrimf: true, PlafondExoneration: 0, ProrataJours: true, Ordre: sb.Ordre, Montant: Number(e.SalaireBase), Taux: null });
       // Absences non rémunérées approuvées : retenue = salaire de base / diviseur x jours, qui réduit le brut
       const absences = await run(`SELECT c.DateDebut, c.DateFin, c.NombreJours FROM paie.Conge c
         JOIN paie.TypeConge t ON t.Id = c.TypeCongeId
@@ -467,7 +496,7 @@ async function calculerPeriode(db, periodeId, user) {
       }
       const dSortie = isoDate(e.DateSortie instanceof Date ? e.DateSortie.toISOString() : e.DateSortie);
       const sortieMois = dSortie && dSortie >= debut && dSortie <= fin;
-      const ass = rubriques.calculerAssiettes(lignes, Number(e.SalaireBase), p);
+      const ass = rubriques.calculerAssiettes(lignes, Number(e.SalaireBase), p, { jours: presences.has(e.Id) ? presences.get(e.Id) : null });
       const { gains, retenues } = ass;
       const r = calc.calculer({
         brut: ass.brut, brutCotisable: ass.brutCotisable, brutImposable: ass.brutImposable, brutCfceTrimf: ass.brutCfceTrimf,
@@ -868,7 +897,7 @@ module.exports = {
   listEmployes, getEmploye, saveEmploye, deactivateEmploye, listRubriquesSaisie,
   listRubriques, saveRubrique, listEmployeRubriques, saveEmployeRubrique, closeEmployeRubrique, deleteEmployeRubrique,
   listCategories, saveCategorie, listTypesConge, saveTypeConge, listConges, saveConge, setStatutConge, deleteConge, soldesAt, setSoldeInitial,
-  listPlan, savePlanCompte, listComptesRubriques, saveCompteRubrique, listParamsCompta, saveParamCompta, ecrituresPeriode, reversementsPeriode, virementsPeriode, getOrCreatePeriode, findPeriode, cloturerPeriode, listVariables, saveVariable, deleteVariable,
+  listPlan, savePlanCompte, listComptesRubriques, saveCompteRubrique, listParamsCompta, saveParamCompta, ecrituresPeriode, reversementsPeriode, virementsPeriode, getOrCreatePeriode, findPeriode, cloturerPeriode, listVariables, saveVariable, deleteVariable, listPresences, savePresence, deletePresence,
   calculerPeriode, journal, getBulletins, unverifiedCount,
   listParams, saveRow, deleteRow, getEntreprise, saveEntreprise,
   ROLES, needsAdmin, listUsers, createUser, setUserActive, resetPassword,

@@ -84,6 +84,9 @@ function registerApi(handle, E) {
   handle('per:close', 'paie', (id) => repo.cloturerPeriode(db, Number(id), E.user()));
   handle('var:list', 'read', (periodeId) => repo.listVariables(db, Number(periodeId)));
   handle('var:save', 'paie', (d) => repo.saveVariable(db, d, E.user()));
+  handle('pres:list', 'read', (periodeId) => repo.listPresences(db, Number(periodeId)));
+  handle('pres:save', 'paie', (d) => repo.savePresence(db, d, E.user()));
+  handle('pres:delete', 'paie', (employeId, periodeId) => repo.deletePresence(db, Number(employeId), Number(periodeId), E.user()));
   handle('var:delete', 'paie', (id, periodeId) => repo.deleteVariable(db, Number(id), Number(periodeId), E.user()));
 
   handle('paie:calculer', 'paie', (periodeId) => repo.calculerPeriode(db, Number(periodeId), E.user()));

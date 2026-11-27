@@ -54,10 +54,17 @@ function mensualitePret(montant, duree, idx) {
  * Calcule les montants résolus et les assiettes (brut, brutImposable/IR, brutCotisable/IPRES-CSS-IPM, brutCfceTrimf/CFCE-TRIMF, autresRetenues)
  * à partir des indicateurs propres à chaque rubrique.
  */
-function calculerAssiettes(lignes, salaireBase = 0, params = null) {
+function calculerAssiettes(lignes, salaireBase = 0, params = null, opts = {}) {
+  // Jours travaillés du mois (null = mois complet) : les gains « proratisés » sont multipliés par jours / jours de référence (26).
+  const ref = params && typeof params.has === 'function' && params.has('JOURS_REFERENCE_MOIS') ? Number(params.get('JOURS_REFERENCE_MOIS')) : 26;
+  const jours = opts && opts.jours != null && Number(opts.jours) >= 0 && ref > 0 && Number(opts.jours) !== ref ? Number(opts.jours) : null;
   const resolved = lignes.map((l) => {
     const m = montantLigne(l, salaireBase);
     const isPct = l.ModeCalcul === 'POURCENTAGE' && l.Taux != null && Number(l.Taux) !== 0 && !(l.Montant != null && Number(l.Montant) !== 0);
+    if (jours != null && l.Type === 'GAIN' && l.ProrataJours) {
+      // bulletin : base = montant plein du mois, taux = jours travaillés, gain = montant proratisé
+      return { ...l, Montant: Math.round(m * jours / ref), BaseCalculee: m, TauxCalcule: jours };
+    }
     return {
       ...l,
       Montant: m,

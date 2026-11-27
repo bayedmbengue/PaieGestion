@@ -53,6 +53,7 @@ const MIGRATION02 = path.join(__dirname, '..', '..', 'sql', 'migration_02.sql');
 const MIGRATION03 = path.join(__dirname, '..', '..', 'sql', 'migration_03.sql');
 const MIGRATION04 = path.join(__dirname, '..', '..', 'sql', 'migration_04.sql');
 const MIGRATION05 = path.join(__dirname, '..', '..', 'sql', 'migration_05.sql');
+const MIGRATION07 = path.join(__dirname, '..', '..', 'sql', 'migration_07.sql');
 const MIGRATION06 = path.join(__dirname, '..', '..', 'sql', 'migration_06.sql');
 
 /** Crée les tables/colonnes des congés, catégories et comptabilité si elles manquent (nécessite le droit de créer des tables). */
@@ -115,6 +116,19 @@ async function ensureMigration06(db) {
   } catch (e) {
     throw new Error("Une mise à jour de la base est nécessaire (barème des charges de famille). Dans SSMS : sélectionnez la base « " + db.cfg.database +
       " », ouvrez le fichier « migration_06.sql » (dossier « sql » de PaieGestion), exécutez-le, puis relancez PaieGestion. (" + e.message + ')');
+  }
+}
+
+/** Rubriques proratisées selon les jours travaillés (colonne ProrataJours, table PresencePeriode, paramètre JOURS_REFERENCE_MOIS). */
+async function ensureMigration07(db) {
+  const r = (await db.query(`SELECT COL_LENGTH(N'paie.Rubrique', N'ProrataJours') AS a, OBJECT_ID(N'paie.PresencePeriode', N'U') AS b,
+    (SELECT COUNT(*) FROM paie.ParametreLegal WHERE Code = N'JOURS_REFERENCE_MOIS') AS c`))[0];
+  if (r.a != null && r.b != null && r.c > 0) return;
+  try {
+    await db.batch(fs.readFileSync(MIGRATION07, 'utf8'));
+  } catch (e) {
+    throw new Error("Une mise à jour de la base est nécessaire (jours travaillés). Dans SSMS : sélectionnez la base « " + db.cfg.database +
+      " », ouvrez le fichier « migration_07.sql » (dossier « sql » de PaieGestion), exécutez-le, puis relancez PaieGestion. (" + e.message + ')');
   }
 }
 
@@ -240,6 +254,7 @@ WHERE b.DateFin IS NULL AND b.Verifie = 0;
   await ensureMigration04(db);
   await ensureMigration05(db);
   await ensureMigration06(db);
+  await ensureMigration07(db);
 }
 
-module.exports = { ensureSchema, ensureMigration03, ensureMigration04, MIGRATION04, ensureMigration05, MIGRATION05, ensureMigration06, MIGRATION06, REDUCTION_FAMILLE, reductionSql, IPM_SQL, seed02Sql, MIGRATION02, MIGRATION03, COMPTES_RUBRIQUES, PARAMS_COMPTA };
+module.exports = { ensureSchema, ensureMigration03, ensureMigration04, MIGRATION04, ensureMigration05, MIGRATION05, ensureMigration06, MIGRATION06, ensureMigration07, MIGRATION07, REDUCTION_FAMILLE, reductionSql, IPM_SQL, seed02Sql, MIGRATION02, MIGRATION03, COMPTES_RUBRIQUES, PARAMS_COMPTA };
