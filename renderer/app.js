@@ -324,8 +324,19 @@ async function openVariables() {
   const editable = can('paie') && !per.Cloturee;
   const [emps, rubs] = editable ? await Promise.all([api('emp:list'), api('rub:list')]) : [[], []];
   const body = `<p class="muted" style="margin-top:0">Éléments propres à ${MOIS[state.mois - 1]} ${state.annee} : heures supplémentaires, primes exceptionnelles (gains) ou absences, acomptes (retenues). Après toute modification, relancez « Calculer la paie ».</p>
+    <h4>Jours travaillés</h4><p class="muted" style="margin-top:0">Pour un employé qui n'a pas travaillé tout le mois, indiquez ses jours travaillés : les rubriques proratisées sont multipliées par jours / 26. Sans saisie, le mois est complet.</p>
+    <div id="pl"></div>
+    ${editable ? `<div class="inline">${sel('Employé', 'p_emp', emps.map((e) => [e.Id, `${e.Nom} ${e.Prenom}`]), '')}${inp('Jours travaillés (0 à 31)', 'p_j', '', 'number', 'min="0" max="31" step="0.5"')}<button type="button" class="p" id="p_add">Enregistrer</button></div>` : ''}
+    <h4>Variables</h4>
     <div id="vl"></div>
     ${editable ? `<h4>Ajouter</h4><div class="inline">${sel('Employé', 'v_emp', emps.map((e) => [e.Id, `${e.Nom} ${e.Prenom}`]), '')}${sel('Rubrique', 'v_rub', rubs.map((r) => [r.Id, `${r.Libelle} (${r.Type === 'GAIN' ? 'gain' : 'retenue'})`]), '')}${inp('Montant (FCFA)', 'v_mt', '', 'number', 'min="1"')}${inp('Commentaire', 'v_com', '')}<button type="button" class="p" id="v_add">Ajouter</button></div>` : (per.Cloturee ? '<p class="muted">Période clôturée : lecture seule.</p>' : '')}`;
+  const drawPres = async (root) => {
+    const lp = await api('pres:list', per.Id);
+    $('#pl', root).innerHTML = lp.length
+      ? `<table class="mini"><thead><tr><th>Employé</th><th class="n">Jours travaillés</th><th></th></tr></thead><tbody>${lp.map((x) => `<tr><td>${esc(x.Nom)} ${esc(x.Prenom)}</td><td class="n">${fmt(x.JoursTravailles)}</td><td class="n">${editable ? `<button class="s d" data-delp="${x.EmployeId}">Supprimer</button>` : ''}</td></tr>`).join('')}</tbody></table>`
+      : '<p class="muted">Aucune saisie : tous les employés sont comptés sur un mois complet.</p>';
+    root.querySelectorAll('[data-delp]').forEach((b) => { b.onclick = guard(async () => { await api('pres:delete', Number(b.dataset.delp), per.Id); await drawPres(root); }); });
+  };
   const draw = async (root) => {
     const list = await api('var:list', per.Id);
     $('#vl', root).innerHTML = list.length
@@ -334,7 +345,12 @@ async function openVariables() {
     root.querySelectorAll('[data-del]').forEach((b) => { b.onclick = guard(async () => { await api('var:delete', Number(b.dataset.del), per.Id); await draw(root); }); });
   };
   openModal({ title: 'Variables du mois', wide: true, body, buttons: [cancelBtn], onOpen: (root) => {
-    guard(draw)(root);
+    guard(draw)(root); guard(drawPres)(root);
+    const addP = $('#p_add', root);
+    if (addP) addP.onclick = guard(async () => {
+      await api('pres:save', { PeriodeId: per.Id, EmployeId: Number($('[name=p_emp]', root).value), JoursTravailles: Number($('[name=p_j]', root).value) });
+      $('[name=p_j]', root).value = ''; await drawPres(root);
+    });
     const add = $('#v_add', root);
     if (add) add.onclick = guard(async () => {
       await api('var:save', { PeriodeId: per.Id, EmployeId: Number($('[name=v_emp]', root).value), RubriqueId: Number($('[name=v_rub]', root).value), Montant: Number($('[name=v_mt]', root).value), Commentaire: $('[name=v_com]', root).value });
@@ -419,7 +435,7 @@ async function tabRubriquesCatalogue() {
       const g = r.Type === 'GAIN';
       const isSys = !!r.EstSysteme;
       return `<tr><td><b>${esc(r.Code)}</b>${isSys ? ' <span class="badge">Système</span>' : ''}</td><td>${esc(r.Libelle)}</td><td>${esc(TYPE_RUB[r.Type] || r.Type)}</td>
-        <td>${esc(MODE_RUB[r.ModeCalcul] || r.ModeCalcul || 'Montant fixe')}${r.Type === 'RETENUE' ? `<br><span class="muted">${r.BaseRetenue === 'BRUT_IMPOSABLE' ? 'sur brut imposable' : 'sur net après impôt'}${r.Echelonne ? ' · prêt échelonné' : ''}</span>` : ''}</td>
+        <td>${esc(MODE_RUB[r.ModeCalcul] || r.ModeCalcul || 'Montant fixe')}${r.Type === 'RETENUE' ? `<br><span class="muted">${r.BaseRetenue === 'BRUT_IMPOSABLE' ? 'sur brut imposable' : 'sur net après impôt'}${r.Echelonne ? ' · prêt échelonné' : ''}</span>` : (g && r.ProrataJours ? '<br><span class="muted">au prorata des jours travaillés</span>' : '')}</td>
         <td>${g ? yes(r.Imposable) : '—'}</td><td>${g ? yes(r.SoumisCotisation) : '—'}</td><td>${g ? yes(r.SoumisCfceTrimf) : '—'}</td>
         <td class="n">${g && Number(r.PlafondExoneration) > 0 ? fmt(r.PlafondExoneration) : ''}</td>
         <td>${esc(r.CompteComptable || '')}</td><td class="n">${r.Ordre}</td>
@@ -430,7 +446,7 @@ async function tabRubriquesCatalogue() {
   };
 
   const edit = (r) => {
-    const v = r || { Type: 'GAIN', ModeCalcul: 'FIXE', BaseRetenue: 'NET_APRES_IMPOT', Echelonne: false, Imposable: true, SoumisCotisation: true, SoumisCfceTrimf: true, Ordre: 100, CompteComptable: '', EstSysteme: false, Actif: true };
+    const v = r || { Type: 'GAIN', ModeCalcul: 'FIXE', BaseRetenue: 'NET_APRES_IMPOT', Echelonne: false, ProrataJours: true, Imposable: true, SoumisCotisation: true, SoumisCfceTrimf: true, Ordre: 100, CompteComptable: '', EstSysteme: false, Actif: true };
     const isSys = !!(r && v.EstSysteme);
     openModal({
       title: r ? `Rubrique ${v.Code}` : 'Nouvelle rubrique', wide: true,
@@ -445,6 +461,7 @@ async function tabRubriquesCatalogue() {
           ${chk("Soumise à l'IR (Imposable)", 'Imposable', v.Imposable)}
           ${chk('Soumise aux cotisations (IPRES / CSS / IPM)', 'SoumisCotisation', v.SoumisCotisation !== undefined ? v.SoumisCotisation : v.Imposable)}
           ${chk('Soumise à la CFCE et à la TRIMF', 'SoumisCfceTrimf', v.SoumisCfceTrimf !== undefined ? v.SoumisCfceTrimf : v.Imposable)}
+          ${chk('Proratisée selon les jours travaillés (montant × jours travaillés / 26)', 'ProrataJours', v.ProrataJours)}
           ${inp("Plafond d'exonération mensuel (FCFA, vide = aucun)", 'PlafondExoneration', Number(v.PlafondExoneration) > 0 ? v.PlafondExoneration : '', 'number', 'min="0" step="1"')}
         </div>
         <div id="rret" class="grid two span2" style="${v.Type === 'RETENUE' && !isSys ? '' : 'display:none'}">
