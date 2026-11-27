@@ -4,7 +4,7 @@
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = (n) => (n == null ? '' : new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(Math.round(Number(n))).replace(/[\u202f\u00a0]/g, ' '));
-const fmtTaux = (t) => (t == null ? '' : `${String(Number(t)).replace('.', ',')} %`);
+const fmtTaux = (t, enJours) => (t == null ? '' : `${String(Number(t)).replace('.', ',')} ${enJours ? 'j' : '%'}`);   // « 15 j » = jours travaillés
 const fmtDate = (d) => (d ? String(d).slice(0, 10).split('-').reverse().join('/') : '');
 const SITFAM = { C: 'Célibataire', M: 'Marié(e)', D: 'Divorcé(e)', V: 'Veuf/Veuve' };
 
@@ -16,7 +16,7 @@ function bulletinHtml(b, per, ent) {
   const periodeTxt = `${MOIS[per.Mois - 1]} ${per.Annee}`;
 
   const rows = [
-    ...gains.map((l) => `<tr><td>${esc(l.Libelle)}</td><td class="n">${fmt(l.Base)}</td><td class="n">${fmtTaux(l.Taux)}</td><td class="n">${fmt(l.MontantGain)}</td><td class="n"></td></tr>`),
+    ...gains.map((l) => `<tr><td>${esc(l.Libelle)}</td><td class="n">${fmt(l.Base)}</td><td class="n">${fmtTaux(l.Taux, l.TauxEnJours)}</td><td class="n">${fmt(l.MontantGain)}</td><td class="n"></td></tr>`),
     `<tr class="sub"><td colspan="3">Salaire brut</td><td class="n">${fmt(b.Brut)}</td><td></td></tr>`,
     ...retenues.map((l) => `<tr><td>${esc(l.Libelle)}</td><td class="n">${fmt(l.Base)}</td><td class="n">${fmtTaux(l.Taux)}</td><td></td><td class="n">${fmt(l.MontantRetenue)}</td></tr>`),
     `<tr class="sub"><td colspan="3">Total des retenues</td><td></td><td class="n">${fmt(totalRet)}</td></tr>`,

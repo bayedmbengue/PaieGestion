@@ -566,8 +566,13 @@ async function getBulletins(db, periodeId, bulletinId) {
     LEFT JOIN paie.ClasseProfessionnelle cl ON cl.Code = k.Echelon
     WHERE b.PeriodeId = @p AND (@b IS NULL OR b.Id = @b) ORDER BY e.Nom, e.Prenom`, { p: periodeId, b: bulletinId || null });
   const lignes = await db.query(`
-    SELECT l.BulletinId, l.Libelle, l.Base, l.Taux, l.MontantGain, l.MontantRetenue, l.MontantPatronal
+    SELECT l.BulletinId, l.Libelle, l.Base, l.Taux, l.MontantGain, l.MontantRetenue, l.MontantPatronal,
+           -- le « taux » d'une rubrique proratisée est un nombre de JOURS travaillés (affiché « 15 j » et non « 15 % »)
+           CASE WHEN l.Taux IS NOT NULL AND l.MontantGain <> 0 AND (r.ProrataJours = 1 OR r.Code = N'SALBASE')
+                 AND pr.JoursTravailles IS NOT NULL AND l.Taux = pr.JoursTravailles THEN 1 ELSE 0 END AS TauxEnJours
     FROM paie.LigneBulletin l JOIN paie.BulletinPaie b ON b.Id = l.BulletinId
+    LEFT JOIN paie.Rubrique r ON r.Id = l.RubriqueId
+    LEFT JOIN paie.PresencePeriode pr ON pr.EmployeId = b.EmployeId AND pr.PeriodeId = b.PeriodeId
     WHERE b.PeriodeId = @p AND (@b IS NULL OR b.Id = @b) ORDER BY l.BulletinId, l.Ordre, l.Id`, { p: periodeId, b: bulletinId || null });
   const soldes = new Map((await soldesAt(db, monthBounds(per.Annee, per.Mois).fin)).map((x) => [x.EmployeId, x]));
   for (const b of bulletins) { b.lignes = lignes.filter((l) => l.BulletinId === b.Id); b.conge = soldes.get(b.EmployeId) || null; }
