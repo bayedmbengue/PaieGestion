@@ -13,7 +13,7 @@ test('le script SQL fournit toutes les rubriques utilisées par le calcul', () =
   for (const c of RUB) assert.ok(schema.includes(`N'${c}'`), `rubrique absente du script : ${c}`);
 });
 
-function fakeDb(cumulsPrec = [], employe = {}, lignesUnion = null) {
+function fakeDb(cumulsPrec = [], employe = {}, lignesUnion = null, presences = []) {
   const inserted = { bulletins: [], lignes: [] };
   const params = [['IPRES_RG_SAL', 5.6], ['IPRES_RG_PAT', 8.4], ['IPRES_RG_PLAFOND', 432000], ['IPRES_RCC_SAL', 2.4], ['IPRES_RCC_PAT', 3.6],
     ['IPRES_RCC_PLAFOND', 1296000], ['CSS_PF_PAT', 7], ['CSS_ATMP_PAT', 1], ['CSS_PLAFOND', 63000], ['CFCE_PAT', 3], ['ABATTEMENT_IR', 30], ['ABATTEMENT_IR_PLAFOND', 900000],
@@ -23,6 +23,7 @@ function fakeDb(cumulsPrec = [], employe = {}, lignesUnion = null) {
   const run = async (sql, p) => {
     if (/FROM paie\.Conge c/.test(sql)) return [];
     if (/FROM paie\.BulletinPaie b JOIN paie\.PeriodePaie/.test(sql)) return cumulsPrec;
+    if (/FROM paie\.PresencePeriode/.test(sql)) return presences;
     if (/FROM paie\.PeriodePaie WHERE Id/.test(sql)) return [{ Id: 1, Annee: 2026, Mois: 11, Cloturee: false }];
     if (/FROM paie\.ParametreLegal/.test(sql)) return params;
     if (/FROM paie\.BaremeIR/.test(sql)) return [{ TrancheMin: 0, TrancheMax: 630000, Taux: 0 }, { TrancheMin: 630000, TrancheMax: 1500000, Taux: 20 }, { TrancheMin: 1500000, TrancheMax: null, Taux: 30 }];
@@ -114,4 +115,15 @@ test('retenue sur le brut imposable : l\'IR du mois est plus faible que pour une
   await repo.calculerPeriode(brut, 1, { id: 1 });
   assert.ok(brut.inserted.bulletins[0].ir < net.inserted.bulletins[0].ir, `IR ${brut.inserted.bulletins[0].ir} devrait être < ${net.inserted.bulletins[0].ir}`);
   assert.equal(brut.inserted.bulletins[0].ar, net.inserted.bulletins[0].ar);   // même montant déduit du net
+});
+
+test('calculerPeriode : jours travaillés saisis → salaire de base proratisé sur le bulletin (18 j / 26)', async () => {
+  const db = fakeDb([], {}, null, [{ EmployeId: 7, JoursTravailles: 18 }]);
+  await repo.calculerPeriode(db, 1, { id: 1 });
+  const l = db.inserted.lignes.find((x) => /base/i.test(x.l));
+  assert.equal(l.g, Math.round(300000 * 18 / 26));   // salaire de base proratisé : 207 692
+  assert.equal(l.base, 300000);                       // base = montant plein
+  assert.equal(l.taux, 18);                           // « taux » = jours travaillés
+  const t = db.inserted.lignes.find((x) => /transport/i.test(x.l));
+  assert.equal(t.g, 40000);                           // rubrique non marquée « proratisée » : montant plein
 });

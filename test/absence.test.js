@@ -17,6 +17,7 @@ function fake(absences) {
   const run = async (sql, p) => {
     if (/FROM paie\.Conge c/.test(sql)) return absences;
     if (/FROM paie\.BulletinPaie b JOIN paie\.PeriodePaie/.test(sql)) return [];
+    if (/FROM paie\.PresencePeriode/.test(sql)) return [];
     if (/FROM paie\.PeriodePaie WHERE Id/.test(sql)) return [{ Id: 1, Annee: 2026, Mois: 11, Cloturee: false }];
     if (/FROM paie\.ParametreLegal/.test(sql)) return params;
     if (/FROM paie\.BaremeIR/.test(sql)) return [{ TrancheMin: 0, TrancheMax: 630000, Taux: 0 }, { TrancheMin: 630000, TrancheMax: 1500000, Taux: 20 }, { TrancheMin: 1500000, TrancheMax: 4000000, Taux: 30 }];

@@ -71,6 +71,7 @@ test('calculerPeriode avec prime en POURCENTAGE et PlafondExoneration sur la rub
   const run = async (sql, p) => {
     if (/FROM paie\.Conge c/.test(sql)) return [];
     if (/FROM paie\.BulletinPaie b JOIN paie\.PeriodePaie/.test(sql)) return [];
+    if (/FROM paie\.PresencePeriode/.test(sql)) return [];
     if (/FROM paie\.PeriodePaie WHERE Id/.test(sql)) return [{ Id: 1, Annee: 2026, Mois: 11, Cloturee: false }];
     if (/FROM paie\.ParametreLegal/.test(sql)) return baseParams;
     if (/FROM paie\.BaremeIR/.test(sql)) return baremeIR;
