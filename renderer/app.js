@@ -353,7 +353,8 @@ async function openVariables() {
     });
     const add = $('#v_add', root);
     if (add) add.onclick = guard(async () => {
-      await api('var:save', { PeriodeId: per.Id, EmployeId: Number($('[name=v_emp]', root).value), RubriqueId: Number($('[name=v_rub]', root).value), Montant: Number($('[name=v_mt]', root).value), Commentaire: $('[name=v_com]', root).value });
+      const rs = await api('var:save', { PeriodeId: per.Id, EmployeId: Number($('[name=v_emp]', root).value), RubriqueId: Number($('[name=v_rub]', root).value), Montant: Number($('[name=v_mt]', root).value), Commentaire: $('[name=v_com]', root).value });
+      if (rs && rs.remplace) toast(`Cette rubrique est déjà affectée à l'employé (${rs.remplace.Montant != null ? fmt(rs.remplace.Montant) + ' FCFA' : rs.remplace.Taux + ' %'}${rs.remplace.Pret ? ', prêt échelonné' : ''}) : pour ce mois, la variable la remplace.`);
       $('[name=v_mt]', root).value = ''; $('[name=v_com]', root).value = ''; await draw(root);
     });
   } });
