@@ -309,7 +309,7 @@ async function openDetail(bulletinId) {
   if (!b) throw new Error('Bulletin introuvable.');
   const part = (title, key, cls) => {
     const ls = b.lignes.filter((l) => (key === 'MontantGain' ? Number(l[key]) !== 0 : Number(l[key]) > 0));
-    return `<h4>${title}</h4><table class="mini"><tbody>${ls.map((l) => `<tr><td>${esc(l.Libelle)}</td><td class="n muted">${l.Base != null ? fmt(l.Base) : ''}</td><td class="n muted">${l.Taux != null ? esc(String(Number(l.Taux)).replace('.', ',')) + ' %' : ''}</td><td class="n ${cls}">${fmt(l[key])}</td></tr>`).join('') || '<tr><td class="muted">—</td></tr>'}</tbody></table>`;
+    return `<h4>${title}</h4><table class="mini"><tbody>${ls.map((l) => `<tr><td>${esc(l.Libelle)}</td><td class="n muted">${l.Base != null ? fmt(l.Base) : ''}</td><td class="n muted">${l.Taux != null ? esc(String(Number(l.Taux)).replace('.', ',')) + (l.TauxEnJours ? ' j' : ' %') : ''}</td><td class="n ${cls}">${fmt(l[key])}</td></tr>`).join('') || '<tr><td class="muted">—</td></tr>'}</tbody></table>`;
   };
   openModal({ title: `${b.Nom} ${b.Prenom} — ${MOIS[state.mois - 1]} ${state.annee}`, wide: true, buttons: [cancelBtn],
     body: `${part('Gains', 'MontantGain', '')}<p style="text-align:right;margin:4px 0"><b>Brut : ${fmt(b.Brut)} FCFA</b></p>${part('Retenues', 'MontantRetenue', '')}
