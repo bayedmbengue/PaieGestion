@@ -111,4 +111,29 @@ function calculerAssiettes(lignes, salaireBase = 0, params = null, opts = {}) {
   };
 }
 
-module.exports = { MODES_CALCUL, MODES_SAISIE, BASES_RETENUE: ['NET_APRES_IMPOT', 'BRUT_IMPOSABLE'], mensualitePret, montantLigne, plafondExoneration, partSoumise, calculerAssiettes };
+/**
+ * Une rubrique n'est utilisée qu'UNE fois par mois : si une variable du mois existe pour une rubrique déjà affectée à
+ * l'employé, la variable REMPLACE le montant affecté (une seule ligne). Plusieurs variables d'une même rubrique
+ * (anciennes saisies) sont additionnées en une seule ligne.
+ */
+function fusionnerVariables(lignes) {
+  const vars = new Map();
+  for (const l of lignes) {
+    if (!l.EstVariable) continue;
+    const v = vars.get(l.RubriqueId);
+    if (v) v.Montant = Number(v.Montant || 0) + Number(l.Montant || 0);
+    else vars.set(l.RubriqueId, { ...l });
+  }
+  if (!vars.size) return lignes;
+  const out = [];
+  const placees = new Set();
+  for (const l of lignes) {
+    if (!vars.has(l.RubriqueId)) { out.push(l); continue; }
+    if (placees.has(l.RubriqueId)) continue;
+    placees.add(l.RubriqueId);
+    out.push(vars.get(l.RubriqueId));
+  }
+  return out;
+}
+
+module.exports = { fusionnerVariables, MODES_CALCUL, MODES_SAISIE, BASES_RETENUE: ['NET_APRES_IMPOT', 'BRUT_IMPOSABLE'], mensualitePret, montantLigne, plafondExoneration, partSoumise, calculerAssiettes };

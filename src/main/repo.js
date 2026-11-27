@@ -382,9 +382,23 @@ const listVariables = (db, periodeId) => db.query(`
 async function saveVariable(db, d, user) {
   await assertOuverte(db, d.PeriodeId);
   if (num(d.Montant) <= 0) throw new Error('Le montant doit être supérieur à 0.');
+  const deja = await db.query('SELECT COUNT(*) AS n FROM paie.VariablePaie WHERE EmployeId=@e AND PeriodeId=@p AND RubriqueId=@r',
+    { e: Number(d.EmployeId), p: Number(d.PeriodeId), r: Number(d.RubriqueId) });
+  if (deja[0] && Number(deja[0].n) > 0) throw new Error('Une variable existe déjà pour cette rubrique et cet employé ce mois-ci : une rubrique ne s\'utilise qu\'une fois par mois. Supprimez-la puis saisissez le montant voulu.');
+  // Rubrique déjà affectée à l'employé sur ce mois ? Dans ce cas la variable la remplace (indiquée à l'utilisateur)
+  const per = (await db.query('SELECT Annee, Mois FROM paie.PeriodePaie WHERE Id=@p', { p: Number(d.PeriodeId) }))[0];
+  let remplace = null;
+  if (per) {
+    const { debut, fin } = monthBounds(per.Annee, per.Mois);
+    const aff = await db.query(`SELECT TOP 1 er.Montant, er.Taux, er.MontantPret FROM paie.EmployeRubrique er
+      WHERE er.EmployeId=@e AND er.RubriqueId=@r AND er.Actif=1 AND er.DateDebut<=@fin AND (er.DateFin IS NULL OR er.DateFin>=@debut)`,
+      { e: Number(d.EmployeId), r: Number(d.RubriqueId), debut, fin });
+    if (aff[0]) remplace = { Montant: aff[0].Montant != null ? Number(aff[0].Montant) : null, Taux: aff[0].Taux != null ? Number(aff[0].Taux) : null, Pret: Number(aff[0].MontantPret) > 0 };
+  }
   await db.query('INSERT INTO paie.VariablePaie (EmployeId, PeriodeId, RubriqueId, Montant, Commentaire) VALUES (@e,@p,@r,@m,@c)',
     { e: Number(d.EmployeId), p: Number(d.PeriodeId), r: Number(d.RubriqueId), m: num(d.Montant), c: str(d.Commentaire, 200) });
   await audit(db, user, 'CREATION', 'VariablePaie', null, `emp ${d.EmployeId} rub ${d.RubriqueId} ${d.Montant}`);
+  return { remplace };
 }
 
 async function deleteVariable(db, id, periodeId, user) {
@@ -461,16 +475,19 @@ async function calculerPeriode(db, periodeId, user) {
     const presences = new Map((await run('SELECT EmployeId, JoursTravailles FROM paie.PresencePeriode WHERE PeriodeId = @per', { per: periodeId })).map((x) => [x.EmployeId, Number(x.JoursTravailles)]));
 
     for (const e of employes) {
-      const lignes = await run(`
+      let lignes = await run(`
         SELECT r.Id AS RubriqueId, r.Code, r.Libelle, r.Type, r.ModeCalcul, r.Imposable, r.SoumisCotisation, r.SoumisCfceTrimf, r.PlafondExoneration, r.Ordre, r.ProrataJours,
-               r.BaseRetenue, er.Montant, er.Taux, er.MontantPret, er.DureeMois, er.DateDebut
+               r.BaseRetenue, er.Montant, er.Taux, er.MontantPret, er.DureeMois, er.DateDebut, 0 AS EstVariable
         FROM paie.EmployeRubrique er JOIN paie.Rubrique r ON r.Id = er.RubriqueId
         WHERE er.EmployeId=@id AND er.Actif=1 AND er.DateDebut<=@fin AND (er.DateFin IS NULL OR er.DateFin>=@debut)
         UNION ALL
         SELECT r.Id, r.Code, r.Libelle, r.Type, r.ModeCalcul, r.Imposable, r.SoumisCotisation, r.SoumisCfceTrimf, r.PlafondExoneration, r.Ordre, r.ProrataJours,
-               r.BaseRetenue, ISNULL(v.Montant,0) AS Montant, NULL AS Taux, NULL AS MontantPret, NULL AS DureeMois, NULL AS DateDebut
+               r.BaseRetenue, ISNULL(v.Montant,0) AS Montant, NULL AS Taux, NULL AS MontantPret, NULL AS DureeMois, NULL AS DateDebut, 1 AS EstVariable
         FROM paie.VariablePaie v JOIN paie.Rubrique r ON r.Id = v.RubriqueId
         WHERE v.EmployeId=@id AND v.PeriodeId=@per`, { id: e.Id, debut, fin, per: periodeId });
+
+      // Une rubrique n'apparaît qu'une fois par mois : la variable du mois remplace le montant affecté
+      lignes = rubriques.fusionnerVariables(lignes);
 
       // Prêts : la mensualité du mois (n/durée) remplace le montant ; hors durée du prêt, aucune retenue
       for (let i = lignes.length - 1; i >= 0; i--) {
