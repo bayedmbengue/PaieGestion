@@ -18,7 +18,7 @@ const state = {
   paramTab: 'param', congeTab: 'demandes', congeAnnee: new Date().getFullYear(), congeStatut: '', comptaTab: 'ecritures',
   rubTab: 'catalogue', rubType: '', rubQ: '', rubEmp: '', rubRub: '', rubActifOnly: true,
   declTab: 'decl_ir', declAnnee: new Date().getFullYear(), declDebut: new Date().getMonth() + 1, declFin: new Date().getMonth() + 1,
-  rapTab: 'journal', rapAnnee: new Date().getFullYear(), rapMois: new Date().getMonth() + 1,
+  rapTab: 'journal', rapPretVue: 'situation', rapPretEtat: 'TOUS', rapAnnee: new Date().getFullYear(), rapMois: new Date().getMonth() + 1,
   rapPerDebut: new Date().getMonth() + 1, rapPerFin: new Date().getMonth() + 1,
   rapAnnDebut: 1, rapAnnFin: 12,
   rapDateDebut: `${new Date().getFullYear()}-01-01`, rapDateFin: `${new Date().getFullYear()}-12-31`,
@@ -510,8 +510,7 @@ async function tabRubriquesAffectations() {
     <div class="tw"><table><thead><tr><th>Employé</th><th>Rubrique</th><th>Mode</th><th class="n">Valeur</th><th>Du</th><th>Au</th><th>Commentaire</th><th></th></tr></thead><tbody>
       ${rows.map((r) => {
         const closed = r.DateFin && r.DateFin < tday;
-        const reste = r.MontantPret > 0 ? Math.max(0, Number(r.MontantPret) - Number(r.Rembourse || 0)) : 0;
-        const val = r.MontantPret > 0 ? `${fmt(r.MontantPret)} FCFA sur ${r.DureeMois} mois<br><span class="muted">${fmt(r.Montant)} FCFA / mois</span><br><span class="muted">Remboursé : ${fmt(r.Rembourse || 0)}</span><br>${reste > 0 ? `<span class="badge warn">Reste à rembourser : ${fmt(reste)} FCFA</span>` : '<span class="badge ok">Prêt soldé</span>'}` : (r.ModeCalcul === 'POURCENTAGE' ? `${esc(String(r.Taux).replace('.', ','))} %` : `${fmt(r.Montant)} FCFA`);
+        const val = r.MontantPret > 0 ? `${fmt(r.MontantPret)} FCFA sur ${r.DureeMois} mois<br><span class="muted">${fmt(r.Montant)} FCFA / mois</span>` : (r.ModeCalcul === 'POURCENTAGE' ? `${esc(String(r.Taux).replace('.', ','))} %` : `${fmt(r.Montant)} FCFA`);
         return `<tr><td><b>${esc(r.Nom)}</b> ${esc(r.Prenom)} <span class="muted">${esc(r.Matricule)}</span></td>
           <td>${esc(r.Rubrique)} <span class="muted">${esc(r.RubriqueCode)}</span>${r.Type === 'RETENUE' ? ' <span class="badge warn">Retenue</span>' : ''}</td>
           <td>${esc(MODE_RUB[r.ModeCalcul] || r.ModeCalcul)}</td>
@@ -848,6 +847,7 @@ const RAP_TABS = [
   ['historique', 'Historique employé'],
   ['employes', 'Liste des employés'],
   ['conges', 'Congés & absences'],
+  ['prets', 'Prêts du personnel'],
 ];
 
 function fmtRapCell(col, val) {
@@ -925,6 +925,7 @@ function rapFiltersPayload(tab) {
   if (tab === 'impots') return { ...base, annee: state.rapAnnee, moisDebut: state.rapPerDebut, moisFin: state.rapPerFin };
   if (tab === 'employes') return { ...base, actif: state.rapActif };
   if (tab === 'conges') return { ...base, dateDebut: state.rapDateDebut, dateFin: state.rapDateFin, statut: state.rapCongeStatut || null, vue: state.rapCongeVue };
+  if (tab === 'prets') return { ...base, vue: state.rapPretVue, etatPret: state.rapPretEtat };
   return base;
 }
 
@@ -951,6 +952,9 @@ async function pageRapports() {
     }
   } else if (tab === 'employes') {
     spec = `<select id="ract" title="État">${[['1', 'Actifs uniquement'], ['0', 'Inactifs uniquement'], ['ALL', 'Actifs et inactifs']].map(([v, l]) => `<option value="${v}" ${state.rapActif === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+  } else if (tab === 'prets') {
+    spec = `<select id="rpv" title="Vue"><option value="situation" ${state.rapPretVue !== 'echeances' ? 'selected' : ''}>Situation des prêts</option><option value="echeances" ${state.rapPretVue === 'echeances' ? 'selected' : ''}>Échéances payées</option></select>`
+      + `<select id="rpe" title="État du prêt">${[['TOUS', 'Tous les prêts'], ['ENCOURS', 'En cours (reste à rembourser)'], ['SOLDE', 'Soldés']].map(([v, l]) => `<option value="${v}" ${state.rapPretEtat === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
   } else if (tab === 'conges') {
     const soldes = state.rapCongeVue === 'soldes';
     spec = `<select id="rcv" title="Vue"><option value="demandes" ${!soldes ? 'selected' : ''}>Demandes et absences</option><option value="soldes" ${soldes ? 'selected' : ''}>Soldes de congés payés</option></select>`
@@ -1004,6 +1008,8 @@ async function pageRapports() {
   };
   if ($('#rv')) $('#rv').onchange = () => { state.rapAnnuelVue = $('#rv').value; refresh(); };
   if ($('#ro')) $('#ro').onchange = () => { state.rapOrg = $('#ro').value; refresh(); };
+  if ($('#rpv')) $('#rpv').onchange = () => { state.rapPretVue = $('#rpv').value; refresh(); };
+  if ($('#rpe')) $('#rpe').onchange = () => { state.rapPretEtat = $('#rpe').value; refresh(); };
   if ($('#ract')) $('#ract').onchange = () => { state.rapActif = $('#ract').value; refresh(); };
   if ($('#rcv')) $('#rcv').onchange = () => { state.rapCongeVue = $('#rcv').value; guard(pageRapports)(); };
   if ($('#rd1')) $('#rd1').onchange = () => { state.rapDateDebut = $('#rd1').value || state.rapDateDebut; refresh(); };
