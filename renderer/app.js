@@ -510,7 +510,8 @@ async function tabRubriquesAffectations() {
     <div class="tw"><table><thead><tr><th>Employé</th><th>Rubrique</th><th>Mode</th><th class="n">Valeur</th><th>Du</th><th>Au</th><th>Commentaire</th><th></th></tr></thead><tbody>
       ${rows.map((r) => {
         const closed = r.DateFin && r.DateFin < tday;
-        const val = r.MontantPret > 0 ? `${fmt(r.MontantPret)} FCFA sur ${r.DureeMois} mois<br><span class="muted">${fmt(r.Montant)} FCFA / mois</span>` : (r.ModeCalcul === 'POURCENTAGE' ? `${esc(String(r.Taux).replace('.', ','))} %` : `${fmt(r.Montant)} FCFA`);
+        const reste = r.MontantPret > 0 ? Math.max(0, Number(r.MontantPret) - Number(r.Rembourse || 0)) : 0;
+        const val = r.MontantPret > 0 ? `${fmt(r.MontantPret)} FCFA sur ${r.DureeMois} mois<br><span class="muted">${fmt(r.Montant)} FCFA / mois</span><br><span class="muted">Remboursé : ${fmt(r.Rembourse || 0)}</span><br>${reste > 0 ? `<span class="badge warn">Reste à rembourser : ${fmt(reste)} FCFA</span>` : '<span class="badge ok">Prêt soldé</span>'}` : (r.ModeCalcul === 'POURCENTAGE' ? `${esc(String(r.Taux).replace('.', ','))} %` : `${fmt(r.Montant)} FCFA`);
         return `<tr><td><b>${esc(r.Nom)}</b> ${esc(r.Prenom)} <span class="muted">${esc(r.Matricule)}</span></td>
           <td>${esc(r.Rubrique)} <span class="muted">${esc(r.RubriqueCode)}</span>${r.Type === 'RETENUE' ? ' <span class="badge warn">Retenue</span>' : ''}</td>
           <td>${esc(MODE_RUB[r.ModeCalcul] || r.ModeCalcul)}</td>
