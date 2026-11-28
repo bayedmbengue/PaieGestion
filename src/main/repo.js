@@ -258,7 +258,17 @@ async function saveRubrique(db, d, user) {
 const listEmployeRubriques = (db, f = {}) => db.query(`
   SELECT er.Id, er.EmployeId, e.Matricule, e.Nom, e.Prenom,
          er.RubriqueId, r.Code AS RubriqueCode, r.Libelle AS Rubrique, r.Type, r.ModeCalcul, r.Echelonne, r.BaseRetenue,
-         er.Montant, er.Taux, er.MontantPret, er.DureeMois, er.DateDebut, er.DateFin, er.Actif, er.Commentaire
+         er.Montant, er.Taux, er.MontantPret, er.DureeMois, er.DateDebut, er.DateFin, er.Actif, er.Commentaire,
+         -- prêt : total réellement retenu sur les bulletins (calculés) depuis le début du prêt ; reste = prêt - remboursé
+         CASE WHEN er.MontantPret > 0 THEN (
+           SELECT ISNULL(SUM(l.MontantRetenue), 0)
+           FROM paie.LigneBulletin l
+           JOIN paie.BulletinPaie b ON b.Id = l.BulletinId
+           JOIN paie.PeriodePaie pp ON pp.Id = b.PeriodeId
+           WHERE b.EmployeId = er.EmployeId AND l.RubriqueId = er.RubriqueId
+             AND (pp.Annee * 12 + pp.Mois) >= (YEAR(er.DateDebut) * 12 + MONTH(er.DateDebut))
+             AND (er.DateFin IS NULL OR (pp.Annee * 12 + pp.Mois) <= (YEAR(er.DateFin) * 12 + MONTH(er.DateFin)))
+         ) END AS Rembourse
   FROM paie.EmployeRubrique er
   JOIN paie.Employe e ON e.Id = er.EmployeId
   JOIN paie.Rubrique r ON r.Id = er.RubriqueId
