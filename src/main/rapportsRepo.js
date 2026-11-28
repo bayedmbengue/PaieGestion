@@ -40,11 +40,12 @@ function normalizeFilters(type, raw = {}) {
   const actif = ['0', '1', 'ALL'].includes(String(raw.actif)) ? String(raw.actif) : '1';
   const organisme = ['TOUS', 'IPRES', 'CSS', 'IPM'].includes(raw.organisme) ? raw.organisme : 'TOUS';
   const vue = String(raw.vue || '');
+  const etatPret = ['TOUS', 'ENCOURS', 'SOLDE'].includes(raw.etatPret) ? raw.etatPret : 'TOUS';
   return {
     annee, mois, moisDebut, moisFin, dateDebut, dateFin,
     employeId: optId(raw.employeId),
     categorie: optCode(raw.categorie),
-    statut, actif, organisme, vue,
+    statut, actif, organisme, vue, etatPret,
   };
 }
 
@@ -261,6 +262,45 @@ async function queryConges(db, f) {
 }
 
 /** Exécute un rapport en lecture seule et renvoie sa structure complète (aperçu, CSV, HTML PDF). */
+// Prêts : remboursé = total réellement retenu sur les bulletins calculés, depuis le début du prêt (sur la durée de l'affectation)
+const FENETRE_PRET = `(pp.Annee * 12 + pp.Mois) >= (YEAR(er.DateDebut) * 12 + MONTH(er.DateDebut))
+    AND (er.DateFin IS NULL OR (pp.Annee * 12 + pp.Mois) <= (YEAR(er.DateFin) * 12 + MONTH(er.DateFin)))`;
+
+async function queryPrets(db, f) {
+  const cat = 'OUTER APPLY (SELECT TOP 1 c.Categorie FROM paie.Contrat c WHERE c.EmployeId = er.EmployeId AND c.EstActif = 1 ORDER BY c.DateDebut DESC) k';
+  const where = 'er.MontantPret > 0 AND (@emp IS NULL OR er.EmployeId = @emp) AND (@cat IS NULL OR k.Categorie = @cat)';
+  const prm = { emp: f.employeId, cat: f.categorie };
+  const prets = await db.query(`
+    SELECT er.Id AS PretId, er.EmployeId, e.Matricule, e.Nom, e.Prenom, r.Libelle AS Rubrique,
+           er.MontantPret, er.DureeMois, er.Montant, er.DateDebut, er.DateFin, er.Actif,
+           (SELECT ISNULL(SUM(l.MontantRetenue), 0) FROM paie.LigneBulletin l
+              JOIN paie.BulletinPaie b ON b.Id = l.BulletinId JOIN paie.PeriodePaie pp ON pp.Id = b.PeriodeId
+              WHERE b.EmployeId = er.EmployeId AND l.RubriqueId = er.RubriqueId AND ${FENETRE_PRET}) AS Rembourse,
+           (SELECT COUNT(*) FROM paie.LigneBulletin l
+              JOIN paie.BulletinPaie b ON b.Id = l.BulletinId JOIN paie.PeriodePaie pp ON pp.Id = b.PeriodeId
+              WHERE b.EmployeId = er.EmployeId AND l.RubriqueId = er.RubriqueId AND l.MontantRetenue > 0 AND ${FENETRE_PRET}) AS NbPayees
+    FROM paie.EmployeRubrique er
+    JOIN paie.Employe e ON e.Id = er.EmployeId
+    JOIN paie.Rubrique r ON r.Id = er.RubriqueId
+    ${cat}
+    WHERE ${where}
+    ORDER BY e.Nom, e.Prenom, er.DateDebut`, prm);
+  if (f.vue !== 'echeances') return { prets };
+  const echeances = await db.query(`
+    SELECT er.Id AS PretId, e.Matricule, e.Nom, e.Prenom, r.Libelle AS Rubrique, er.MontantPret, er.DureeMois, er.DateDebut,
+           pp.Annee, pp.Mois, l.MontantRetenue AS Montant
+    FROM paie.EmployeRubrique er
+    JOIN paie.Employe e ON e.Id = er.EmployeId
+    JOIN paie.Rubrique r ON r.Id = er.RubriqueId
+    JOIN paie.BulletinPaie b ON b.EmployeId = er.EmployeId
+    JOIN paie.PeriodePaie pp ON pp.Id = b.PeriodeId
+    JOIN paie.LigneBulletin l ON l.BulletinId = b.Id AND l.RubriqueId = er.RubriqueId
+    ${cat}
+    WHERE ${where} AND l.MontantRetenue > 0 AND ${FENETRE_PRET}
+    ORDER BY e.Nom, e.Prenom, er.Id, pp.Annee, pp.Mois`, prm);
+  return { prets, echeances };
+}
+
 async function runReport(db, type, rawFilters = {}) {
   if (!REPORT_TYPES.includes(type)) throw new Error(`Type de rapport inconnu : ${type}`);
   const f = normalizeFilters(type, rawFilters);
@@ -273,6 +313,7 @@ async function runReport(db, type, rawFilters = {}) {
   else if (type.startsWith('decl_')) raw = await queryDeclaration(db, f);
   else if (type === 'employes') raw = await queryEmployes(db, f);
   else if (type === 'conges') raw = await queryConges(db, f);
+  else if (type === 'prets') raw = await queryPrets(db, f);
   return { report: buildReport(type, raw, f, meta), filters: f };
 }
 

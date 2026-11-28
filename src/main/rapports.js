@@ -7,7 +7,7 @@
 const MOIS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
 const SITFAM = { C: 'Célibataire', M: 'Marié(e)', D: 'Divorcé(e)', V: 'Veuf/Veuve' };
 const STATUT_CONGE = { DEMANDE: 'En attente', APPROUVE: 'Approuvé', REFUSE: 'Refusé', PRIS: 'Pris' };
-const REPORT_TYPES = ['journal', 'annuel', 'cotisations', 'impots', 'historique', 'employes', 'conges',
+const REPORT_TYPES = ['journal', 'annuel', 'cotisations', 'impots', 'historique', 'employes', 'conges', 'prets',
   'decl_ir', 'decl_trimf', 'decl_cfce', 'decl_ipres_css', 'decl_ipm', 'decl_1024'];
 
 const r2 = (x) => Math.round(Number(x || 0) * 100) / 100;
@@ -513,6 +513,98 @@ function buildConges(rawData, filters, meta) {
   };
 }
 
+/** Prêts du personnel : situation de chaque prêt (échéances payées, remboursé, reste) ou détail des échéances payées. */
+function buildPrets(rawData, filters, meta) {
+  const today = new Date().toISOString().slice(0, 10);
+  const etat = ['ENCOURS', 'SOLDE'].includes(filters.etatPret) ? filters.etatPret : 'TOUS';
+  const etatLabel = etat === 'ENCOURS' ? 'Prêts en cours' : etat === 'SOLDE' ? 'Prêts soldés' : 'Tous les prêts';
+  const prets = (rawData.prets || []).map((r) => {
+    const pret = Number(r.MontantPret) || 0;
+    const rembourse = Number(r.Rembourse) || 0;
+    const reste = Math.max(0, r2(pret - rembourse));
+    const arrete = !r.Actif || (r.DateFin && String(r.DateFin).slice(0, 10) < today);
+    return {
+      ...r,
+      MontantPret: pret, Rembourse: rembourse, Reste: reste,
+      Echeances: `${Number(r.NbPayees) || 0} / ${Number(r.DureeMois) || 0}`,
+      Statut: reste === 0 ? 'Soldé' : (arrete ? 'Arrêté (reste dû)' : 'En cours'),
+    };
+  }).filter((r) => etat === 'TOUS' || (etat === 'ENCOURS' ? r.Reste > 0 : r.Reste === 0));
+
+  if (filters.vue === 'echeances') {
+    const cumuls = new Map();
+    const rows = (rawData.echeances || []).map((r) => {
+      const montant = Number(r.Montant) || 0;
+      const cumul = r2((cumuls.get(r.PretId) || 0) + montant);
+      cumuls.set(r.PretId, cumul);
+      const debut = String(r.DateDebut).slice(0, 10);
+      const n = (Number(r.Annee) * 12 + Number(r.Mois)) - (Number(debut.slice(0, 4)) * 12 + Number(debut.slice(5, 7))) + 1;
+      return {
+        ...r, Echeance: `${n} / ${r.DureeMois}`, Periode: `${MOIS[Number(r.Mois) - 1]} ${r.Annee}`,
+        Montant: montant, Cumul: cumul, ResteApres: Math.max(0, r2((Number(r.MontantPret) || 0) - cumul)),
+      };
+    }).filter((r) => prets.some((p) => p.PretId === r.PretId));
+    const total = rows.reduce((a, r) => a + r.Montant, 0);
+    return {
+      type: 'prets',
+      title: 'Échéances de prêts payées',
+      subtitle: filterSubtitle(etatLabel, meta),
+      filenameBase: `Echeances_prets_${today}`,
+      landscape: true,
+      kpis: [
+        { label: 'Échéances payées', value: String(rows.length) },
+        { label: 'Total retenu', value: `${fmtMoney(total)} FCFA`, tone: 'ok' },
+      ],
+      columns: [
+        { key: 'Matricule', label: 'Matricule' },
+        { key: 'Nom', label: 'Nom', bold: true },
+        { key: 'Prenom', label: 'Prénom' },
+        { key: 'Rubrique', label: 'Prêt' },
+        { key: 'Echeance', label: 'N° échéance', align: 'n' },
+        { key: 'Periode', label: 'Période' },
+        { key: 'Montant', label: 'Montant retenu', align: 'n', format: 'money', bold: true },
+        { key: 'Cumul', label: 'Cumul remboursé', align: 'n', format: 'money' },
+        { key: 'ResteApres', label: 'Reste après', align: 'n', format: 'money' },
+      ],
+      rows,
+      totals: rows.length ? { Matricule: `Total (${rows.length})`, Montant: total } : null,
+      emptyMessage: 'Aucune échéance payée pour ces critères.',
+    };
+  }
+
+  const sums = sumCols(prets, ['MontantPret', 'Rembourse', 'Reste']);
+  return {
+    type: 'prets',
+    title: 'Situation des prêts du personnel',
+    subtitle: filterSubtitle(etatLabel, meta),
+    filenameBase: `Situation_prets_${today}`,
+    landscape: true,
+    kpis: [
+      { label: 'Prêts', value: String(prets.length) },
+      { label: 'Total accordé', value: `${fmtMoney(sums.MontantPret)} FCFA` },
+      { label: 'Total remboursé', value: `${fmtMoney(sums.Rembourse)} FCFA`, tone: 'ok' },
+      { label: 'Reste à rembourser', value: `${fmtMoney(sums.Reste)} FCFA` },
+    ],
+    columns: [
+      { key: 'Matricule', label: 'Matricule' },
+      { key: 'Nom', label: 'Nom', bold: true },
+      { key: 'Prenom', label: 'Prénom' },
+      { key: 'Rubrique', label: 'Prêt' },
+      { key: 'DateDebut', label: 'Début', format: 'date' },
+      { key: 'MontantPret', label: 'Montant du prêt', align: 'n', format: 'money' },
+      { key: 'DureeMois', label: 'Durée (mois)', align: 'n', format: 'num' },
+      { key: 'Montant', label: 'Mensualité', align: 'n', format: 'money' },
+      { key: 'Echeances', label: 'Échéances payées', align: 'n' },
+      { key: 'Rembourse', label: 'Remboursé', align: 'n', format: 'money' },
+      { key: 'Reste', label: 'Reste à rembourser', align: 'n', format: 'money', bold: true },
+      { key: 'Statut', label: 'Statut' },
+    ],
+    rows: prets,
+    totals: prets.length ? { Matricule: `Total (${prets.length})`, MontantPret: sums.MontantPret, Rembourse: sums.Rembourse, Reste: sums.Reste } : null,
+    emptyMessage: 'Aucun prêt pour ces critères.',
+  };
+}
+
 function buildReport(type, rawData, filters = {}, meta = {}) {
   switch (type) {
     case 'journal': return buildJournal(rawData, filters, meta);
@@ -522,6 +614,7 @@ function buildReport(type, rawData, filters = {}, meta = {}) {
     case 'historique': return buildHistorique(rawData, filters, meta);
     case 'employes': return buildEmployes(rawData, filters, meta);
     case 'conges': return buildConges(rawData, filters, meta);
+    case 'prets': return buildPrets(rawData, filters, meta);
     default:
       if (String(type).startsWith('decl_')) return require('./declarations').buildDeclaration(type, rawData, filters, meta);   // chargé à la demande (évite une dépendance circulaire)
       throw new Error(`Type de rapport inconnu : ${type}`);
